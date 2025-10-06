@@ -3,21 +3,21 @@
 @tailwind utilities;
 
 :root {
-  --primary: #7c3aed; /* 紫色主色调 */
-  --primary-dark: #4c1d95; /* 深紫辅助色调 */
-  --primary-light: #ddd6fe; /* 浅紫 */
-  --secondary: #6366f1; /* 靛蓝色 */
-  --accent: #818cf8; /* 紫蓝色点缀 */
-  --foreground-rgb: 26, 32, 44; /* 深色文本 */
-  --background-start-rgb: 245, 243, 255; /* 浅紫背景开始 */
-  --background-end-rgb: 250, 249, 255; /* 浅紫背景结束 */
+  --primary: #165DFF; /* 蓝色主色调 */
+  --primary-dark: #0F4FD8; /* 深蓝辅助色调 */
+  --primary-light: #E8F3FF; /* 浅蓝 */
+  --secondary: #36CFFB; /* 天蓝色 */
+  --accent: #73C2FF; /* 浅蓝色点缀 */
+  --foreground-rgb: 10, 20, 30; /* 深色文本 */
+  --background-start-rgb: 248, 250, 252; /* 浅蓝背景开始 */
+  --background-end-rgb: 255, 255, 255; /* 白色背景结束 */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --foreground-rgb: 255, 255, 255; /* 白色文本 */
-    --background-start-rgb: 15, 10, 35; /* 深紫黑背景开始 */
-    --background-end-rgb: 25, 15, 45; /* 深蓝紫背景结束 */
+    --background-start-rgb: 10, 20, 30; /* 深蓝黑背景开始 */
+    --background-end-rgb: 15, 25, 40; /* 深蓝背景结束 */
   }
 }
 
@@ -46,7 +46,6 @@ html, body {
 body.bg-astronaut {
   position: relative;
   min-height: 100vh;
-  overflow: hidden;
   margin: 0;
   padding: 0;
 }

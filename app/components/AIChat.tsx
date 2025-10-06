@@ -7,36 +7,32 @@ import type { AIProvider } from '../services/ai';
 import { createProviderFromEnv } from '../services/ai';
 import type { ChatMessage as MessageItem } from '../services/ai/types';
 import toast from 'react-hot-toast';
+import LearningSession from '../components/LearningFlow/LearningSession';
+import { ConversationService } from '../services/conversationService';
+import { ConversationHistory, ConversationType } from '../types/conversation';
+import { ChatMessage, Role } from '../utils/chatTypes';
+import TableRenderer from './TableRenderer';
 
 interface AIChatProps {
   savedItems: LearningItem[];
   onClose: () => void;
 }
 
-// 会话类型与本地存储键（用于保存/恢复对话）
-type Conversation = {
-  id: string;
-  title: string;
-  messages: MessageItem[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-const CONV_STORAGE_KEY = 'ai_conversations_v1';
-const CONV_ACTIVE_KEY = 'ai_conversations_active_id_v1';
-
 const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
-  const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSavedContent, setShowSavedContent] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [showLearningFlow, setShowLearningFlow] = useState(false);
+  const [conversations, setConversations] = useState<ConversationHistory[]>([]);
+  const [activeConversation, setActiveConversation] = useState<ConversationHistory | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [showSidebar, setShowSidebar] = useState(true); // 控制对话列表的显示/隐藏
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const apiServiceRef = useRef<AIProvider | null>(null);
+  const conversationService = ConversationService.getInstance();
 
   // 从环境变量创建 Provider；保持与原有环境变量兼容
   const DEBUG_MODE = (process.env.NEXT_PUBLIC_XUNFEI_DEBUG === 'true') || (process.env.NEXT_PUBLIC_AI_DEBUG === 'true');
@@ -59,22 +55,42 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
 
       // 设置消息处理器
       apiServiceRef.current.onMessage((content: string, isFinal: boolean) => {
+        debugLog('收到消息内容:', content, '是否最终消息:', isFinal);
+        
+        // 确保消息内容不为空才更新状态
+        if (!content && !isFinal) {
+          debugLog('跳过空消息');
+          return;
+        }
+        
         setMessages(prev => {
           const lastMessage = prev[prev.length - 1];
+          
+          // 确保内容不为undefined或null
+          const validContent = content || '';
+          
           if (lastMessage && lastMessage.role === 'assistant') {
             // 更新最后一条助手消息
-            return [...prev.slice(0, -1), {
+            const updatedContent = lastMessage.content + validContent;
+            const updatedMessage = {
               ...lastMessage,
-              content: lastMessage.content + content
-            }];
+              content: updatedContent
+            };
+            debugLog('更新助手消息内容:', { oldContent: lastMessage.content, newContent: updatedContent });
+            return [...prev.slice(0, -1), updatedMessage];
           } else {
             // 添加新的助手消息
-            return [...prev, { role: 'assistant', content }];
+            const newMessage = { role: 'assistant' as const, content: validContent };
+            debugLog('添加新助手消息:', newMessage);
+            return [...prev, newMessage];
           }
         });
 
+        debugLog('消息更新完成，isFinal:', isFinal);
+        
         if (isFinal) {
           setIsLoading(false);
+          debugLog('消息接收完成');
         }
       });
 
@@ -95,47 +111,83 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     };
   }, []);
 
-  // 加载本地会话
+  // 加载对话历史
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CONV_STORAGE_KEY);
-      if (raw) {
-        const list: Conversation[] = JSON.parse(raw);
-        setConversations(list);
-        const savedActive = localStorage.getItem(CONV_ACTIVE_KEY);
-        let current: Conversation | undefined;
-        if (savedActive) current = list.find(c => c.id === savedActive);
-        if (!current && list.length > 0) {
-          current = [...list].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const loadConversations = async () => {
+      try {
+        const response = await conversationService.getConversations({
+          type: 'general',
+          sortBy: 'lastActivity',
+          sortOrder: 'desc',
+          limit: 50
+        });
+        setConversations(response.conversations);
+        
+        // 如果有对话，选择最近的一个
+        if (response.conversations.length > 0) {
+          const latest = response.conversations[0];
+          setActiveConversation(latest);
+          setMessages(latest.messages);
         }
-        if (current) {
-          setActiveId(current.id);
-          setMessages(current.messages || []);
-        }
+      } catch (e) {
+        console.warn('载入对话失败:', e);
       }
-    } catch (e) {
-      console.warn('载入会话失败:', e);
-    }
+    };
+    
+    loadConversations();
   }, []);
 
-  // 当消息或激活会话变化时，持久化当前会话
+  // 当消息变化时，保存到当前对话
   useEffect(() => {
-    if (!activeId) return;
-    setConversations(prev => {
-      const idx = prev.findIndex(c => c.id === activeId);
-      if (idx === -1) return prev;
-      const updated = { ...prev[idx], messages, updatedAt: Date.now() };
-      const next = [...prev];
-      next[idx] = updated;
+    if (!activeConversation || messages.length === 0) return;
+    
+    const saveMessages = async () => {
       try {
-        localStorage.setItem(CONV_STORAGE_KEY, JSON.stringify(next));
-        localStorage.setItem(CONV_ACTIVE_KEY, activeId);
-      } catch {}
-      return next;
-    });
-  }, [messages, activeId]);
+        // 更新对话的消息
+        await conversationService.updateConversation(activeConversation.id, {
+          messages: messages
+        });
 
-  const deriveTitle = (msgs: MessageItem[]): string => {
+        // 自动生成标题：当消息数量达到4条且标题是默认标题时
+        if (messages.length >= 4 && 
+            (activeConversation.title.includes('对话') || 
+             activeConversation.title === '新对话' ||
+             activeConversation.title.includes(new Date().toLocaleString('zh-CN')))) {
+          
+          try {
+            const titleResponse = await conversationService.generateTitle({
+              messages: messages,
+              type: 'general'
+            });
+            
+            if (titleResponse.title && titleResponse.title !== activeConversation.title) {
+              // 更新对话标题
+              const updatedConversation = await conversationService.updateConversation(activeConversation.id, {
+                title: titleResponse.title
+              });
+              
+              if (updatedConversation) {
+                setActiveConversation(updatedConversation);
+                // 更新对话列表中的标题
+                setConversations(prev => prev.map(conv => 
+                  conv.id === updatedConversation.id ? updatedConversation : conv
+                ));
+                toast.success(`已自动生成标题: ${titleResponse.title}`);
+              }
+            }
+          } catch (titleError) {
+            console.warn('自动生成标题失败:', titleError);
+          }
+        }
+      } catch (e) {
+        console.warn('保存消息失败:', e);
+      }
+    };
+    
+    saveMessages();
+  }, [messages, activeConversation]);
+
+  const deriveTitle = (msgs: ChatMessage[]): string => {
     const firstUser = msgs.find(m => m.role === 'user');
     if (firstUser) {
       const t = firstUser.content.trim().replace(/\s+/g, ' ');
@@ -144,58 +196,59 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     return `对话 ${new Date().toLocaleString('zh-CN')}`;
   };
 
-  const ensureActiveConversation = (initialMessages: MessageItem[] = []) => {
-    if (activeId) return activeId;
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const now = Date.now();
-    const conv: Conversation = {
-      id,
-      title: deriveTitle(initialMessages),
-      messages: initialMessages,
-      createdAt: now,
-      updatedAt: now,
-    };
-    setConversations(prev => {
-      const next = [conv, ...prev];
-      try { localStorage.setItem(CONV_STORAGE_KEY, JSON.stringify(next)); } catch {}
-      try { localStorage.setItem(CONV_ACTIVE_KEY, id); } catch {}
-      return next;
-    });
-    setActiveId(id);
-    return id;
+  const ensureActiveConversation = async (initialMessages: ChatMessage[] = []) => {
+    if (activeConversation) return activeConversation.id;
+    
+    try {
+      const newConversation = await conversationService.createConversation({
+        title: deriveTitle(initialMessages),
+        type: 'general',
+        initialMessage: initialMessages.length > 0 ? initialMessages[0] : undefined
+      });
+      
+      // 如果有多条初始消息，需要逐一添加
+      if (initialMessages.length > 1) {
+        for (let i = 1; i < initialMessages.length; i++) {
+          await conversationService.addMessage(newConversation.id, initialMessages[i]);
+        }
+      }
+      
+      setActiveConversation(newConversation);
+      setConversations(prev => [newConversation, ...prev]);
+      return newConversation.id;
+    } catch (e) {
+      console.error('创建对话失败:', e);
+      throw e;
+    }
   };
 
   const handleSelectConversation = (id: string) => {
     const conv = conversations.find(c => c.id === id);
-    setActiveId(id);
-    setMessages(conv?.messages || []);
-    try { localStorage.setItem(CONV_ACTIVE_KEY, id); } catch {}
+    if (conv) {
+      setActiveConversation(conv);
+      setMessages(conv.messages);
+    }
   };
 
-  const handleNewConversation = () => {
-    // 不要复用现有 activeId；应创建一个全新的会话，避免清空当前会话消息
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const now = Date.now();
-    const conv: Conversation = {
-      id,
-      title: `对话 ${new Date().toLocaleString('zh-CN')}`,
-      messages: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    setConversations(prev => {
-      const next = [conv, ...prev];
-      try { localStorage.setItem(CONV_STORAGE_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
-    setActiveId(id);
-    try { localStorage.setItem(CONV_ACTIVE_KEY, id); } catch {}
-    setMessages([]);
-    setInputMessage('');
+  const handleNewConversation = async () => {
+    try {
+      const newConversation = await conversationService.createConversation({
+        title: `对话 ${new Date().toLocaleString('zh-CN')}`,
+        type: 'general'
+      });
+      
+      setActiveConversation(newConversation);
+      setConversations(prev => [newConversation, ...prev]);
+      setMessages([]);
+      setInputMessage('');
+    } catch (e) {
+      console.error('创建新对话失败:', e);
+      toast.error('创建新对话失败');
+    }
   };
 
   // 重命名相关
-  const startRename = (c: Conversation) => {
+  const startRename = (c: ConversationHistory) => {
     setEditingId(c.id);
     setEditingTitle(c.title);
   };
@@ -205,192 +258,77 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     setEditingTitle('');
   };
 
-  const commitRename = () => {
+  const commitRename = async () => {
     if (!editingId) return;
     const newTitle = editingTitle.trim() || '未命名对话';
-    setConversations(prev => {
-      const next = prev.map(c => c.id === editingId ? { ...c, title: newTitle, updatedAt: Date.now() } : c);
-      try { localStorage.setItem(CONV_STORAGE_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
-    setEditingId(null);
+    
+    try {
+      await conversationService.updateConversation(editingId, {
+        title: newTitle
+      });
+      
+      setConversations(prev => 
+        prev.map(c => c.id === editingId ? { ...c, title: newTitle } : c)
+      );
+      
+      if (activeConversation?.id === editingId) {
+        setActiveConversation(prev => prev ? { ...prev, title: newTitle } : null);
+      }
+      
+      setEditingId(null);
+    } catch (e) {
+      console.error('重命名失败:', e);
+      toast.error('重命名失败');
+    }
   };
 
   // 删除会话
-  const handleDeleteConversation = (id: string) => {
-    setConversations(prev => {
-      const next = prev.filter(c => c.id !== id);
-      try { localStorage.setItem(CONV_STORAGE_KEY, JSON.stringify(next)); } catch {}
-
-      // 若删除的是当前会话，选择最近更新的一个作为新的 active；若没有则清空
-      if (id === activeId) {
-        const nextActive = next.length > 0 ? [...next].sort((a, b) => b.updatedAt - a.updatedAt)[0].id : null;
-        setActiveId(nextActive);
-        if (nextActive) {
-          const conv = next.find(c => c.id === nextActive);
-          setMessages(conv?.messages || []);
-          try { localStorage.setItem(CONV_ACTIVE_KEY, nextActive); } catch {}
+  const handleDeleteConversation = async (id: string) => {
+    try {
+      await conversationService.deleteConversation(id);
+      
+      setConversations(prev => prev.filter(c => c.id !== id));
+      
+      if (activeConversation?.id === id) {
+        const remaining = conversations.filter(c => c.id !== id);
+        if (remaining.length > 0) {
+          const nextActive = remaining[0];
+          setActiveConversation(nextActive);
+          setMessages(nextActive.messages);
         } else {
+          setActiveConversation(null);
           setMessages([]);
-          try { localStorage.removeItem(CONV_ACTIVE_KEY); } catch {}
         }
       }
-
-      // 若正在重命名被删除的会话，重置重命名状态
-      if (editingId === id) {
-        setEditingId(null);
-        setEditingTitle('');
-      }
-
-      return next;
-    });
-  };
-
-  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      commitRename();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      cancelRename();
+    } catch (e) {
+      console.error('删除对话失败:', e);
+      toast.error('删除对话失败');
     }
   };
 
-  // 自动滚动到最新消息
-  useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  // 基础检索：将 savedItems 分块，基于查询挑选 Top-K 相关片段，避免超长上下文
-  const generateSystemPrompt = (query: string): string => {
-    const q = (query || '').slice(0, 500)
-    if (!savedItems || savedItems.length === 0) {
-      return '你是有帮助的学习助手。当前没有可用的外部资料，请基于通用知识回答；若无法确定请直说不足。'
-    }
-
-    const normalize = (s: string) => (s || '').replace(/\s+/g, ' ').trim()
-    const isCJK = (ch: string) => /[\u3400-\u9fff]/.test(ch)
-    const tokenize = (s: string): string[] => {
-      const out: string[] = []
-      for (const ch of s.toLowerCase()) {
-        if (isCJK(ch)) out.push(ch)
-        else if (/\w/.test(ch)) out.push(ch)
-        else out.push(' ')
-      }
-      return out.join('')
-        .split(/[^\w\u3400-\u9fff]+/)
-        .filter(Boolean)
-    }
-    const qTokens = new Set(tokenize(q))
-    const chunkText = (text: string, maxLen = 600, overlap = 80): string[] => {
-      const t = normalize(text)
-      if (t.length <= maxLen) return [t]
-      const res: string[] = []
-      let i = 0
-      while (i < t.length) {
-        const end = Math.min(t.length, i + maxLen)
-        res.push(t.slice(i, end))
-        if (end === t.length) break
-        i = Math.max(end - overlap, i + 1)
-      }
-      return res
-    }
-    const scoreChunk = (chunk: string): number => {
-      if (qTokens.size === 0) return 0
-      const toks = tokenize(chunk)
-      if (toks.length === 0) return 0
-      let hit = 0
-      for (const tk of toks) if (qTokens.has(tk)) hit++
-      return hit / Math.sqrt(toks.length)
-    }
-
-    type Snip = { score: number; text: string; source: string }
-    const pool: Snip[] = []
-    for (const item of savedItems) {
-      const txt = normalize(item.text || '')
-      if (!txt) continue
-      const chunks = chunkText(txt)
-      // 限制每条最多取前 12 个片段以控量
-      const capped = chunks.slice(0, 12)
-      for (const c of capped) {
-        const s = scoreChunk(c)
-        if (s > 0) pool.push({ score: s, text: c, source: item.subject || '外部资料' })
-      }
-    }
-
-    if (pool.length === 0) {
-      // 没有匹配则退化为简单拼接（截断）
-      const flat = savedItems.map(it => `【来源：${it.subject}】\n${normalize(it.text || '')}`).join('\n\n')
-      const brief = flat.slice(0, 6000)
-      return `你是有帮助的学习助手。请尽量依据下述材料回答，若材料未覆盖请直说不足。\n\n材料：\n${brief}`
-    }
-
-    const top = pool
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 8) // Top-K 片段
-
-    const grouped = top.map((s, i) => `【片段${i + 1}｜来源：${s.source}】\n${s.text}`)
-    const guidance = [
-      '你必须优先依据提供的片段作答；如片段未涵盖，请明确说明资料不足，并给出你能给的通用建议。',
-      '保持答案简明、结构化；适当引用关键句并标注来源片段编号。',
-    ].join('\n')
-
-    return `系统提示：\n${guidance}\n\n检索到的相关资料片段如下：\n${grouped.join('\n\n')}`
-  }
-
-  // 发送消息
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading || !apiServiceRef.current) {
-      return;
-    }
-
-    setError(null);
-    setIsLoading(true);
-    toast.loading('AI正在思考中...', { id: 'ai-thinking' });
-
-    // 添加用户消息
-    const userMessage: MessageItem = { role: 'user', content: inputMessage.trim() };
-    const newActiveId = ensureActiveConversation([...messages, userMessage]);
-    setMessages(prev => [...prev, userMessage]);
-    setConversations(prev => prev.map(c => c.id === newActiveId ? { ...c, title: c.title || deriveTitle([userMessage]) } : c));
+    if (!inputMessage.trim() || isLoading || !apiServiceRef.current) return;
 
     try {
-      // 生成与当前问题相关的系统提示（检索Top-K片段）
-      const systemPrompt = generateSystemPrompt(inputMessage.trim());
+      // 确保有激活的会话
+      const convId = ensureActiveConversation();
       
-      // 构建消息历史，添加系统提示
-      const historyWithSystem = [
-        { role: 'system' as const, content: systemPrompt },
-        ...messages.filter(msg => msg.role !== 'system')
-      ];
+      const userMessage: MessageItem = { role: 'user', content: inputMessage };
+      setMessages(prev => [...prev, userMessage]);
+      setInputMessage('');
+      setIsLoading(true);
+      setError(null);
 
-      // 添加一个空的助手消息，用于流式更新
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-
-      // 发送消息到API
-      await apiServiceRef.current.sendMessage(inputMessage.trim(), historyWithSystem);
-      
-      // 成功后更新toast
-      toast.success('回复完成', { id: 'ai-thinking' });
+      // 发送消息到AI服务
+      await apiServiceRef.current.sendMessage(inputMessage);
     } catch (err) {
-      // 尝试获取更详细的错误信息
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      setError(`发送消息失败: ${errorMessage}`);
+      console.error('发送消息失败:', err);
+      setError('发送消息失败: ' + (err as Error).message);
       setIsLoading(false);
-      
-      // 显示错误提示
-      toast.error(`发送消息失败: ${errorMessage}`, { id: 'ai-thinking' });
-      
-      // 在控制台记录详细错误信息，帮助调试
-      console.error('发送消息时发生错误:', err);
     }
-
-    setInputMessage('');
   };
 
-  // 处理键盘事件
+  // 处理键盘事件（发送消息）
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -398,79 +336,79 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     }
   };
 
-  // 处理Markdown格式：**文本** 转换为 加粗文本
-  const processMarkdownBold = (text: string): React.ReactNode[] => {
-    // 匹配 **文本** 格式
-    const parts = text.split(/(\*\*[^*]+\*\*)/);
-    
-    return parts.map((part, index) => {
-      // 检查是否是加粗文本格式
-      if (part.startsWith('**') && part.endsWith('**')) {
-        // 提取并返回加粗内容
-        return <strong key={index} className="font-bold text-blue-700">{part.substring(2, part.length - 2)}</strong>;
-      }
-      return part;
-    });
-  };
-
-  // 处理Markdown标题：移除 ###
-  const removeMarkdownHeaders = (text: string): string => {
-    // 移除行首的 ### 符号
-    return text.replace(/^\s*#{1,6}\s*/gm, '');
-  };
-
-  // 格式化消息内容，处理换行、空格和Markdown格式
-  const formatMessageContent = (content: string): React.ReactNode => {
-    if (!content) return null;
-
-    // 移除Markdown标题符号
-    const contentWithoutHeaders = removeMarkdownHeaders(content);
-
-    // 分割段落并处理
-    const paragraphs = contentWithoutHeaders.split(/\n\n+/);
-    
-    if (paragraphs.length === 1) {
-      // 单个段落，处理换行和加粗格式
-      const lines = contentWithoutHeaders.split('\n');
-      
-      return lines.map((line, lineIndex) => (
-        <p key={lineIndex} className="whitespace-pre-wrap">
-          {processMarkdownBold(line)}
-        </p>
-      ));
+  // 处理重命名时的键盘事件
+  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      commitRename();
+    } else if (e.key === 'Escape') {
+      cancelRename();
     }
-    
-    // 多个段落，处理段落间距和加粗格式
-    return paragraphs.map((paragraph, i) => (
-      <p key={i} className="whitespace-pre-wrap mb-3">
-        {processMarkdownBold(paragraph)}
-      </p>
-    ));
   };
 
-  // 渲染消息气泡
-  const renderMessage = (message: MessageItem, index: number) => {
-    if (message.role === 'system') return null; // 不显示系统消息
+  // 格式化AI消息内容
+  const formatAIMessage = (content: string) => {
+    // 注意：表格渲染现在由TableRenderer组件处理
+    let formattedContent = content;
 
-    const isUser = message.role === 'user';
+    // 处理Markdown符号 - 使用更安全的正则表达式避免HTML标签冲突
     
-    return (
-      <div 
-        key={index} 
-        className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}
-      >
-        <div 
-          className={`max-w-[80%] p-3 rounded-lg 
-            ${isUser ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'}
-          `}
-        >
-          {formatMessageContent(message.content)}
+    // 1. 首先处理代码块符号 ``` - 保持符号可见，显示为蓝色粗体
+    formattedContent = formattedContent.replace(/(?<!<[^>]*)(```)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
+    
+    // 2. 处理行内代码符号 ` - 保持符号可见，显示为蓝色粗体（避免匹配HTML标签内的内容）
+    formattedContent = formattedContent.replace(/(?<!<[^>]*)(?<!`)(\`)(?!`)(?![^<]*>)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
+    
+    // 3. 处理粗体符号 ** - 隐藏符号，显示蓝色粗体文字（避免匹配HTML标签）
+    formattedContent = formattedContent.replace(/(?<!<[^>]*)\*\*([^*<>]+)\*\*(?![^<]*>)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
+    
+    // 4. 处理斜体符号 * - 隐藏符号，显示蓝色斜体文字（避免与列表符号和HTML标签冲突）
+    formattedContent = formattedContent.replace(/(?<!<[^>]*)(?<!\*)\*([^*\n<>]+)\*(?!\*)(?![^<]*>)/g, '<span style="color: #2563eb; font-style: italic;">$1</span>');
+    
+    // 5. 处理标题 - 隐藏符号，只显示黑色粗体标题文字（避免匹配HTML标签）
+    formattedContent = formattedContent.replace(/(?<!<[^>]*)(#{1,6})\s*(.+)$/gm, '<span style="color: #000000; font-weight: bold; font-size: 1.1em;">$2</span>');
+    
+    // 6. 处理有序列表符号 1. 2. 等 - 保持符号可见，显示为蓝色粗体
+    formattedContent = formattedContent.replace(/^(\s*)(\d+\.)\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
+    
+    // 7. 最后处理列表符号 - 和 * - 保持符号可见，显示为蓝色粗体
+    formattedContent = formattedContent.replace(/^(\s*)([-])\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
+    formattedContent = formattedContent.replace(/^(\s*)(\*)\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
+
+    return formattedContent;
+  };
+
+  // 渲染单条消息
+  const renderMessage = (message: MessageItem, index: number) => (
+    <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
+      <div className={`max-w-[80%] p-3 rounded-lg ${
+        message.role === 'user' 
+          ? 'bg-primary text-white' 
+          : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 shadow-sm'
+      }`}>
+        <div className="prose prose-sm dark:prose-invert max-w-none">
+          {message.role === 'assistant' ? (
+            <TableRenderer content={formatAIMessage(message.content).replace(/\n/g, '<br/>')} />
+          ) : (
+            message.content
+          )}
         </div>
       </div>
-    );
+    </div>
+  );
+
+  // 将LearningItem数组转换为LearningStep数组
+  const convertLearningItemsToLearningSteps = (items: LearningItem[]): any[] => {
+    return items.map((item, index) => ({
+      id: item.id,
+      sessionId: 'session_' + Date.now(),
+      step: 'EXPLAIN' as const,
+      input: { userInput: item.text },
+      output: { explanation: item.text },
+      createdAt: new Date(item.createdAt)
+    }));
   };
 
-  // 渲染已保存的学习内容
+  // 渲染已保存内容
   const renderSavedContent = () => {
     if (savedItems.length === 0) {
       return <p className="text-gray-500 text-sm">暂无已保存的学习内容</p>;
@@ -480,7 +418,7 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
       <div className="space-y-2 max-h-40 overflow-y-auto">
         {savedItems.slice(-5).reverse().map((item) => (
           <div key={item.id} className="p-2 bg-gray-50 rounded text-sm">
-            <div className="font-medium text-blue-600">{item.subject}</div>
+            <div className="font-medium text-primary">{item.subject}</div>
             <div className="text-gray-700 truncate">{item.text}</div>
             <div className="text-xs text-gray-400">
               {new Date(item.createdAt).toLocaleTimeString('zh-CN')}
@@ -493,11 +431,22 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex backdrop-blur-sm">
-      {/* 左侧：会话列表 */}
-      <aside className="w-64 md:w-72 border-r border-gray-200 dark:border-gray-700 flex flex-col bg-white dark:bg-gray-800">
+      {/* 左侧：会话列表 - 可以隐藏/显示 */}
+      <aside className={`${showSidebar ? 'w-64 md:w-72' : 'w-0'} border-r border-gray-200 dark:border-gray-700 flex flex-col bg-white dark:bg-gray-800 transition-all duration-300 ease-in-out overflow-hidden`}>
         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-white">AI对话</h2>
-          <button onClick={handleNewConversation} className="text-blue-600 dark:text-blue-400 text-sm hover:underline">新建</button>
+          <div className="flex items-center gap-2">
+            <button onClick={handleNewConversation} className="text-primary dark:text-primary text-sm hover:underline">新建</button>
+            <button 
+              onClick={() => setShowSidebar(false)}
+              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+              aria-label="隐藏会话列表"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="p-3 overflow-y-auto flex-1">
           {conversations.length === 0 ? (
@@ -518,11 +467,11 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
                         placeholder="输入对话标题"
                       />
                       <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={commitRename}
-                        className="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                        aria-label="保存重命名"
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={commitRename}
+                      className="text-xs px-2 py-1 rounded bg-primary text-white hover:bg-primary/90 transition-colors"
+                      aria-label="保存重命名"
                       >保存</button>
                       <button
                         type="button"
@@ -535,7 +484,7 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
                   ) : (
                     <div className="flex items-center justify-between gap-2">
                       <button
-                        className={`flex-1 text-left text-sm truncate ${c.id === activeId ? 'text-blue-700 dark:text-blue-400 underline' : 'text-blue-600 dark:text-blue-400 hover:underline'}`}
+                        className={`flex-1 text-left text-sm truncate ${c.id === activeConversation?.id ? 'text-primary dark:text-primary underline' : 'text-primary dark:text-primary hover:underline'}`}
                         onClick={() => handleSelectConversation(c.id)}
                         title={c.title}
                       >
@@ -574,7 +523,20 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
       <main className="flex-1 flex flex-col bg-white dark:bg-gray-800">
         {/* 顶部栏 */}
         <div className="px-4 py-3 border-b dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900">
-          <div className="font-medium text-gray-700 dark:text-gray-200 truncate">{conversations.find(c => c.id === activeId)?.title || '新对话'}</div>
+          <div className="flex items-center gap-2">
+            {!showSidebar && (
+              <button 
+                onClick={() => setShowSidebar(true)}
+                className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
+                aria-label="显示会话列表"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-600 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+            )}
+            <div className="font-medium text-gray-700 dark:text-gray-200 truncate">{activeConversation?.title || '新对话'}</div>
+          </div>
           <div className="text-xs text-gray-400 dark:text-gray-500">{savedItems.length > 0 ? `已保存学习内容 ${savedItems.length} 项` : '无已保存内容'}</div>
         </div>
 
@@ -585,26 +547,44 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
 
         {/* 聊天内容区域 */}
         <div ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto bg-gray-50 dark:bg-gray-900">
-          <div className="max-w-3xl mx-auto space-y-2">
-            {messages.map(renderMessage)}
-            {isLoading && (
-              <div className="flex justify-start mb-4">
-                <div className="max-w-[80%] p-3 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 shadow-sm">
-                  <p className="animate-pulse">AI正在思考...</p>
+          {showLearningFlow ? (
+            <div className="max-w-4xl mx-auto">
+              {/* 修复类型错误：savedItems应该符合LearningSession的要求 */}
+              <LearningSession 
+                savedItems={convertLearningItemsToLearningSteps(savedItems)} 
+                onExit={() => setShowLearningFlow(false)} 
+              />
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto space-y-2">
+              {messages.map(renderMessage)}
+              {isLoading && (
+                <div className="flex justify-start mb-4">
+                  <div className="max-w-[80%] p-3 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 shadow-sm">
+                    <p className="animate-pulse">AI正在思考...</p>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 已保存内容切换 */}
         <div className="border-t dark:border-gray-700 px-4 py-2 bg-white dark:bg-gray-800">
-          <button
-            onClick={() => setShowSavedContent(!showSavedContent)}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:underline"
-          >
-            {showSavedContent ? '隐藏' : '显示'}已保存的学习内容 ({savedItems.length}项)
-          </button>
+          <div className="flex space-x-4">
+            <button
+              onClick={() => setShowSavedContent(!showSavedContent)}
+              className="text-sm text-primary dark:text-primary hover:underline"
+            >
+              {showSavedContent ? '隐藏' : '显示'}已保存的学习内容 ({savedItems.length}项)
+            </button>
+            <button
+              onClick={() => setShowLearningFlow(!showLearningFlow)}
+              className="text-sm text-primary dark:text-primary hover:underline"
+            >
+              {showLearningFlow ? '退出' : '进入'}系统化学习
+            </button>
+          </div>
           {showSavedContent && (
             <div className="mt-2">{renderSavedContent()}</div>
           )}
@@ -612,21 +592,22 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
 
         {/* 输入区域 */}
         <div className="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-800">
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-2xl mx-auto">
             <textarea
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="输入您的问题，按Enter发送，Shift+Enter换行..."
-              className="w-full p-3 border dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 h-28 resize-none bg-gray-50 dark:bg-gray-700 dark:text-white"
+              className="w-full pl-4 pr-12 py-2 border dark:border-gray-600 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm bg-white dark:bg-gray-800 dark:text-white mx-auto shadow-sm hover:shadow-md transition-all duration-300"
               disabled={isLoading}
+              style={{ height: '32px', overflow: 'hidden' }}
             />
             <div className="flex justify-end mt-2">
               <button
-                onClick={handleSendMessage}
-                disabled={!inputMessage.trim() || isLoading}
-                className={`px-4 py-2 rounded-md text-white transition-colors ${inputMessage.trim() && !isLoading ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed'}`}
-              >
+              onClick={handleSendMessage}
+              disabled={!inputMessage.trim() || isLoading}
+              className={`px-4 py-2 rounded-md text-white transition-colors ${inputMessage.trim() && !isLoading ? 'bg-primary hover:bg-primary/90' : 'bg-slate-300 dark:bg-slate-600 cursor-not-allowed'}`}
+            >
                 {isLoading ? '发送中...' : '发送'}
               </button>
             </div>

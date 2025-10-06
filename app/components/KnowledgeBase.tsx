@@ -1,20 +1,7 @@
 'use client'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-hot-toast'
-
-type KBItem = {
-  id: string
-  name: string
-  type: string
-  size: number
-  lastModified: number
-  text?: string
-  ocrText?: string
-  notes?: string
-  createdAt: number
-  dataUrl?: string
-  include?: boolean
-}
+import { KnowledgeBaseService, type KBItem } from '../services/knowledgeBaseService'
 
 const KB_STORAGE_KEY = 'kb_items_v2' // 升级版本号以支持新的存储结构
 const KB_SESSION_KEY = 'kb_items_backup_v2'
@@ -215,7 +202,8 @@ async function extractText(file: File): Promise<{ text?: string; note?: string }
   // DOCX（mammoth）
   if (name.endsWith('.docx')) {
     try {
-      const mammoth: any = await import('mammoth/mammoth.browser')
+      // 使用动态导入并添加类型断言
+      const mammoth = await import('mammoth/mammoth.browser') as any
       const ab = await readAsArrayBuffer(file)
       const result = await mammoth.convertToHtml({ arrayBuffer: ab })
       // 粗暴去标签
@@ -270,194 +258,99 @@ async function extractText(file: File): Promise<{ text?: string; note?: string }
 
 import PDFViewer from './PDFViewer'
 
-const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void }> = ({ onItemsChange }) => {
+const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void; hideParsingText?: boolean }> = ({ onItemsChange, hideParsingText = false }) => {
   const [items, setItems] = useState<KBItem[]>([])
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [previewItem, setPreviewItem] = useState<KBItem | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [isStorageAvailable, setIsStorageAvailable] = useState(true)
-  const [storageType, setStorageType] = useState<'indexeddb' | 'localstorage' | 'sessionstorage' | 'memory'>('memory')
+  const [kbService] = useState(() => new KnowledgeBaseService())
+  const [isMigrating, setIsMigrating] = useState(false)
 
-  // 检查存储可用性
-  const checkStorageAvailability = useCallback(() => {
-    // 检查IndexedDB
-    try {
-      if ('indexedDB' in window) {
-        return 'indexeddb';
-      }
-    } catch (e) {
-      console.warn('IndexedDB不可用:', e);
-    }
-    
-    // 检查localStorage
-    try {
-      const testKey = `__storage_test_${Date.now()}`;
-      localStorage.setItem(testKey, testKey);
-      const value = localStorage.getItem(testKey);
-      localStorage.removeItem(testKey);
-      if (value === testKey) {
-        return 'localstorage';
-      }
-    } catch (e) {
-      console.warn('localStorage不可用:', e);
-    }
-    
-    // 检查sessionStorage
-    try {
-      const testKey = `__storage_test_${Date.now()}`;
-      sessionStorage.setItem(testKey, testKey);
-      const value = sessionStorage.getItem(testKey);
-      sessionStorage.removeItem(testKey);
-      if (value === testKey) {
-        return 'sessionstorage';
-      }
-    } catch (e) {
-      console.warn('sessionStorage不可用:', e);
-    }
-    
-    // 所有存储方式都不可用
-    return 'memory';
-  }, []);
-
-  // 载入
+  // 载入知识库项目
   useEffect(() => {
     const loadItems = async () => {
       setIsLoading(true);
       try {
-        // 确定最佳存储方式
-        const bestStorage = checkStorageAvailability();
-        setStorageType(bestStorage);
-        setIsStorageAvailable(bestStorage !== 'memory');
-        console.log('使用存储类型:', bestStorage);
-        
-        let loadedItems: KBItem[] = [];
-        
-        // 按优先级尝试不同的存储方式
-        if (bestStorage === 'indexeddb') {
-          // 从IndexedDB加载
-          loadedItems = await loadFromIndexedDB();
-          console.log('从IndexedDB加载了', loadedItems.length, '个项目');
-        }
-        
-        // 如果IndexedDB没有数据，尝试localStorage
-        if (loadedItems.length === 0 && (bestStorage === 'indexeddb' || bestStorage === 'localstorage')) {
-          try {
-            const raw = localStorage.getItem(KB_STORAGE_KEY);
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (Array.isArray(parsed)) {
-                loadedItems = parsed;
-                console.log('从localStorage加载了', loadedItems.length, '个项目');
-                
-                // 如果从localStorage加载成功且IndexedDB可用，则同步到IndexedDB
-                if (bestStorage === 'indexeddb') {
-                  saveToIndexedDB(loadedItems).then(success => {
-                    if (success) console.log('已同步项目到IndexedDB');
-                  });
-                }
-              }
-            }
-          } catch (error) {
-            console.error('从localStorage加载失败:', error);
-          }
-        }
-        
-        // 如果localStorage没有数据，尝试sessionStorage
-        if (loadedItems.length === 0) {
-          try {
-            const backupRaw = sessionStorage.getItem(KB_SESSION_KEY);
-            if (backupRaw) {
-              const parsed = JSON.parse(backupRaw);
-              if (Array.isArray(parsed)) {
-                loadedItems = parsed;
-                console.log('从sessionStorage加载了', loadedItems.length, '个项目');
-              }
-            }
-          } catch (error) {
-            console.error('从sessionStorage加载失败:', error);
-          }
-        }
+        // 首先尝试从数据库加载
+        const loadedItems = await kbService.getItems();
         
         if (loadedItems.length > 0) {
           setItems(loadedItems);
           if (onItemsChange) onItemsChange(loadedItems);
-          toast.success(`已加载${loadedItems.length}个知识库项目`);
+          console.log('从数据库加载了', loadedItems.length, '个项目');
+        } else {
+          // 如果数据库中没有数据，检查是否需要从本地存储迁移
+          const hasLocalData = await checkLocalStorageData();
+          if (hasLocalData) {
+            setIsMigrating(true);
+            try {
+              const migratedItems = await kbService.migrateFromLocalStorage();
+              setItems(migratedItems);
+              if (onItemsChange) onItemsChange(migratedItems);
+              toast.success(`已迁移${migratedItems.length}个知识库项目到数据库`);
+              console.log('迁移了', migratedItems.length, '个项目到数据库');
+            } catch (error) {
+              console.error('迁移失败:', error);
+              toast.error('迁移本地数据失败');
+            } finally {
+              setIsMigrating(false);
+            }
+          }
         }
       } catch (error) {
         console.error('加载知识库项目失败:', error);
         toast.error('加载知识库失败，请刷新重试');
-        setIsStorageAvailable(false);
       } finally {
         setIsLoading(false);
       }
     };
     
     loadItems();
-  }, [checkStorageAvailability, onItemsChange])
+  }, [kbService, onItemsChange])
 
-  // 持久化（优先使用IndexedDB，带容错/压缩，防止存储容量超限导致丢失）
-  useEffect(() => {
-    const saveItems = async () => {
-      // 优先使用IndexedDB
-      if (storageType === 'indexeddb') {
-        const success = await saveToIndexedDB(items);
-        if (success) {
-          console.log('成功保存到IndexedDB');
-          // 同时备份到localStorage和sessionStorage（如果可用）
-          try {
-            localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(items));
-            sessionStorage.setItem(KB_SESSION_KEY, JSON.stringify(items));
-          } catch (e) {
-            console.warn('备份到localStorage/sessionStorage失败，但IndexedDB已保存成功', e);
-          }
-          return;
+  // 检查本地存储是否有数据
+  const checkLocalStorageData = async (): Promise<boolean> => {
+    try {
+      // 检查localStorage
+      const localData = localStorage.getItem(KB_STORAGE_KEY);
+      if (localData) {
+        const parsed = JSON.parse(localData);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return true;
         }
       }
-      
-      // 如果IndexedDB不可用或保存失败，回退到localStorage
-      const trySaveLocal = (payload: KBItem[]) => localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(payload))
-      const trySaveSession = (payload: KBItem[]) => sessionStorage.setItem(KB_SESSION_KEY, JSON.stringify(payload))
-      try {
-        // 1) 直接保存
-        try {
-          trySaveLocal(items)
-          try { trySaveSession(items) } catch {}
-        } catch (e1) {
-          // 2) 轻度压缩：移除过大的 dataUrl（>200k 字符）
-          const lightCompact = items.map(it => {
-            if (it?.dataUrl && it.dataUrl.length > 200_000) {
-              const { dataUrl, ...rest } = it
-              return rest as KBItem
-            }
-            return it
-          })
-          try {
-            trySaveLocal(lightCompact)
-            try { trySaveSession(lightCompact) } catch {}
-            console.warn('[KB] 已压缩保存：为避免超过 localStorage 限制，移除了部分大文件预览。')
-          } catch (e2) {
-            // 3) 极限压缩：移除所有 dataUrl 预览字段
-            const hardCompact = items.map(({ dataUrl, ...rest }) => rest as KBItem)
-            try {
-              trySaveLocal(hardCompact)
-              try { trySaveSession(hardCompact) } catch {}
-              console.warn('[KB] 已极限压缩保存：移除了全部预览以确保持久化。')
-            } catch (e3) {
-              console.error('[KB] 保存失败：localStorage 容量或权限问题。', e3)
-              // 最后兜底：至少把当前内存中的内容备份到 sessionStorage，保证刷新仍在
-              try { trySaveSession(items) } catch {}
-            }
-          }
+
+      // 检查sessionStorage
+      const sessionData = sessionStorage.getItem(KB_SESSION_KEY);
+      if (sessionData) {
+        const parsed = JSON.parse(sessionData);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return true;
         }
-      } catch {}
-    };
-    
-    if (items.length > 0) {
-      saveItems();
+      }
+
+      // 检查IndexedDB
+      try {
+        const indexedDBItems = await loadFromIndexedDB();
+        if (indexedDBItems.length > 0) {
+          return true;
+        }
+      } catch (error) {
+        console.warn('检查IndexedDB失败:', error);
+      }
+
+      return false;
+    } catch (error) {
+      console.error('检查本地存储失败:', error);
+      return false;
     }
+  }
+
+  // 当items变化时通知父组件
+  useEffect(() => {
     onItemsChange?.(items);
-  }, [items, onItemsChange, storageType])
+  }, [items, onItemsChange])
 
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -578,14 +471,22 @@ const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void }> = (
                 
                 // 更新项目
                 if (extractedText.trim().length > 0) {
-                  setItems(prev => prev.map(item => 
-                    item.id === id 
-                      ? { ...item, text: extractedText } 
-                      : item
-                  ))
-                  toast.success(`PDF文件"${file.name}"文本提取成功`, {
-                    id: `pdf-ocr-${id}`
-                  })
+                  try {
+                    await kbService.updateItem(id, { text: extractedText })
+                    setItems(prev => prev.map(item => 
+                      item.id === id 
+                        ? { ...item, text: extractedText } 
+                        : item
+                    ))
+                    toast.success(`PDF文件"${file.name}"文本提取成功`, {
+                      id: `pdf-ocr-${id}`
+                    })
+                  } catch (error) {
+                    console.error('更新PDF文本失败:', error)
+                    toast.error(`文本提取成功但保存失败`, {
+                      id: `pdf-ocr-${id}`
+                    })
+                  }
                 } else {
                   toast.error(`无法从PDF提取文本，请手动处理`, {
                     id: `pdf-ocr-${id}`
@@ -611,9 +512,19 @@ const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void }> = (
         const { text, note } = await extractText(file)
       newItems.push({ ...base, text, notes: note, dataUrl })
     }
-    setItems(prev => [...newItems, ...prev])
+    
+    // 保存到数据库
+    try {
+      const savedItems = await kbService.saveItems(newItems);
+      setItems(prev => [...savedItems, ...prev]);
+      toast.success(`成功添加${savedItems.length}个文件到知识库`);
+    } catch (error) {
+      console.error('保存文件失败:', error);
+      toast.error('保存文件失败，请重试');
+    }
+    
     setIsLoading(false)
-  }, [])
+  }, [kbService])
 
   const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -623,7 +534,16 @@ const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void }> = (
   const onDragOver = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); setDragOver(true) }
   const onDragLeave = (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); setDragOver(false) }
 
-  const removeItem = (id: string) => setItems(prev => prev.filter(i => i.id !== id))
+  const removeItem = async (id: string) => {
+    try {
+      await kbService.deleteItem(id);
+      setItems(prev => prev.filter(i => i.id !== id));
+      toast.success('文件已删除');
+    } catch (error) {
+      console.error('删除文件失败:', error);
+      toast.error('删除文件失败，请重试');
+    }
+  }
 
   const tryReparse = async (item: KBItem) => {
     // 仅在缺少文本时尝试
@@ -633,19 +553,29 @@ const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void }> = (
     filePicker.onchange = async () => {
       const f = filePicker.files?.[0]
       if (!f) return
-      const { text, note } = await extractText(f)
-      setItems(prev => prev.map(it => it.id === item.id ? { ...it, text, notes: note } : it))
+      try {
+        const { text, note } = await extractText(f)
+        await kbService.updateItem(item.id, { text, notes: note })
+        setItems(prev => prev.map(it => it.id === item.id ? { ...it, text, notes: note } : it))
+        toast.success('文件重新解析成功')
+      } catch (error) {
+        console.error('重新解析失败:', error)
+        toast.error('重新解析失败，请重试')
+      }
     }
     filePicker.click()
   }
 
   return (
-    <section className="bg-white/70 border border-blue-200 rounded-lg p-4 shadow-sm">
+    <section className="bg-slate-50/90 border border-slate-200 dark:border-slate-700 rounded-lg p-4 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold text-blue-700">知识库（上传文件以加入上下文）</h2>
+        <h2 className="text-base font-semibold text-primary">
+          知识库（上传文件以加入上下文）
+          {isMigrating && <span className="ml-2 text-sm text-orange-600">正在迁移本地数据...</span>}
+        </h2>
         <div className="flex items-center gap-2">
           <button
-            className="px-3 py-1.5 text-sm rounded border hover:bg-gray-50"
+            className="px-3 py-1.5 text-sm rounded border border-slate-200 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
             onClick={() => fileInputRef.current?.click()}
           >选择文件</button>
           <input
@@ -662,9 +592,9 @@ const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void }> = (
         onDrop={onDrop}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
-        className={`border-2 border-dashed rounded-md p-6 text-center transition-colors ${dragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50'}`}
+        className={`border-2 border-dashed rounded-md p-6 text-center transition-all ${dragOver ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'border-slate-300 bg-slate-100/50 dark:border-slate-700 dark:bg-slate-800/50'}`}
       >
-        拖拽文件到此处，或点击“选择文件”上传。支持 PDF、Word、TXT、Excel、PNG、JPG、MOV 等。
+        拖拽文件到此处，或点击"选择文件"上传
       </div>
 
       <div className="mt-4">
@@ -675,35 +605,48 @@ const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void }> = (
             {items.map(item => (
               <li key={item.id} className="border rounded-md p-3 bg-white">
                 <div className="flex items-center justify-between">
-                  <div className="font-medium text-gray-800 truncate" title={item.name}>{item.name}</div>
-                  <div className="text-xs text-gray-500">{item.type || '未知类型'} · {formatBytes(item.size)}</div>
+                  <div className="font-medium text-slate-800 dark:text-slate-200 truncate" title={item.name}>{item.name}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">{item.type || '未知类型'} · {formatBytes(item.size)}</div>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs">
-                  <label className="inline-flex items-center gap-1 text-gray-600">
+                  <label className="inline-flex items-center gap-1 text-slate-600 dark:text-slate-300">
                     <input
                       type="checkbox"
                       checked={item.include !== false}
-                      onChange={(e) => setItems(prev => prev.map(it => it.id === item.id ? { ...it, include: e.target.checked } : it))}
+                      onChange={async (e) => {
+                        const newInclude = e.target.checked;
+                        try {
+                          await kbService.updateItem(item.id, { include: newInclude });
+                          setItems(prev => prev.map(it => it.id === item.id ? { ...it, include: newInclude } : it));
+                        } catch (error) {
+                          console.error('更新文件状态失败:', error);
+                          toast.error('更新文件状态失败');
+                          // 恢复checkbox状态
+                          e.target.checked = !newInclude;
+                        }
+                      }}
                     />
                     用于AI对话
                   </label>
                   {(item.dataUrl && (item.type === 'application/pdf' || item.name.toLowerCase().endsWith('.pdf'))) && (
-                    <button className="underline text-blue-600" onClick={() => setPreviewItem(item)}>预览 PDF</button>
+                    <button className="underline text-primary hover:text-primary/80 transition-colors" onClick={() => setPreviewItem(item)}>预览 PDF</button>
                   )}
                 </div>
-                {item.text ? (
-                  <div className="mt-2 text-sm text-gray-700 whitespace-pre-wrap max-h-24 overflow-y-auto">
-                    {item.text.slice(0, 1000)}{item.text.length > 1000 ? '…' : ''}
-                  </div>
-                ) : (
-                  <div className="mt-2 text-sm text-gray-500 flex items-center gap-2">
-                    <span>{item.notes || '尚未解析内容'}</span>
-                    <button className="text-blue-600 underline text-xs" onClick={() => tryReparse(item)}>尝试解析</button>
-                  </div>
+                {!hideParsingText && (
+                  item.text ? (
+                    <div className="mt-2 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-24 overflow-y-auto">
+                      {item.text.slice(0, 1000)}{item.text.length > 1000 ? '…' : ''}
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-sm text-gray-500 flex items-center gap-2">
+                      <span>{item.notes || '尚未解析内容'}</span>
+                      <button className="text-primary underline text-xs hover:text-primary/80 transition-colors" onClick={() => tryReparse(item)}>尝试解析</button>
+                    </div>
+                  )
                 )}
                 <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
                   <span>更新时间：{new Date(item.createdAt).toLocaleString('zh-CN')}</span>
-                  <button className="underline hover:text-red-600" onClick={() => removeItem(item.id)}>删除</button>
+                  <button className="underline text-slate-500 hover:text-red-500 transition-colors" onClick={() => removeItem(item.id)}>删除</button>
                 </div>
               </li>
             ))}

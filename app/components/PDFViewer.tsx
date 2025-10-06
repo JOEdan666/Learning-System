@@ -272,23 +272,23 @@ const PDFViewer: React.FC<Props> = ({ dataUrl, name, onClose, onExtract }) => {
         <div className="px-4 py-3 border-b dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900">
           <div className="text-sm font-medium truncate dark:text-white">{name || 'PDF 预览'}</div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            <button className="px-2 py-1 text-sm border rounded hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 dark:text-gray-200" onClick={zoomOut} title="缩小 (-)">-</button>
-            <span className="text-xs text-gray-500 dark:text-gray-400 min-w-[40px] text-center">{Math.round(scale * 100)}%</span>
-            <button className="px-2 py-1 text-sm border rounded hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 dark:text-gray-200" onClick={zoomIn} title="放大 (+)">+</button>
-            <button className="px-2 py-1 text-sm border rounded hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 dark:text-gray-200" onClick={prev} disabled={pageNum<=1} title="上一页 (←)">上一页</button>
-            <span className="text-xs text-gray-500 dark:text-gray-400 min-w-[50px] text-center">{pageNum}/{numPages}</span>
-            <button className="px-2 py-1 text-sm border rounded hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 dark:text-gray-200" onClick={next} disabled={pageNum>=numPages} title="下一页 (→)">下一页</button>
+            <button className="px-2 py-1 text-sm border border-slate-200 rounded hover:bg-slate-100 hover:border-slate-300 dark:hover:bg-slate-700 dark:border-slate-600 dark:text-slate-200 transition-all" onClick={zoomOut} title="缩小 (-)">-</button>
+            <span className="text-xs text-slate-500 dark:text-slate-400 min-w-[40px] text-center">{Math.round(scale * 100)}%</span>
+            <button className="px-2 py-1 text-sm border border-slate-200 rounded hover:bg-slate-100 hover:border-slate-300 dark:hover:bg-slate-700 dark:border-slate-600 dark:text-slate-200 transition-all" onClick={zoomIn} title="放大 (+)">+</button>
+            <button className="px-2 py-1 text-sm border border-slate-200 rounded hover:bg-slate-100 hover:border-slate-300 dark:hover:bg-slate-700 dark:border-slate-600 dark:text-slate-200 transition-all" onClick={prev} disabled={pageNum<=1} title="上一页 (←)">上一页</button>
+            <span className="text-xs text-slate-500 dark:text-slate-400 min-w-[50px] text-center">{pageNum}/{numPages}</span>
+            <button className="px-2 py-1 text-sm border border-slate-200 rounded hover:bg-slate-100 hover:border-slate-300 dark:hover:bg-slate-700 dark:border-slate-600 dark:text-slate-200 transition-all" onClick={next} disabled={pageNum>=numPages} title="下一页 (→)">下一页</button>
             {onExtract && (
               <>
                 <button 
-                  className="px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors" 
+                  className="px-2 py-1 text-sm bg-primary text-white rounded hover:bg-primary/90 active:bg-primary/80 transition-all" 
                   onClick={extractAllText}
                   disabled={textExtractionProgress > 0}
                 >
                   {textExtractionProgress > 0 ? `提取中 ${textExtractionProgress}%` : '提取文本用于AI'}
                 </button>
                 <button 
-                  className="px-2 py-1 text-sm bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors disabled:opacity-50" 
+                  className="px-2 py-1 text-sm bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white rounded transition-all disabled:opacity-50" 
                   disabled={ocrRunning} 
                   onClick={ocrAllPages}
                 >
@@ -296,22 +296,22 @@ const PDFViewer: React.FC<Props> = ({ dataUrl, name, onClose, onExtract }) => {
                 </button>
               </>
             )}
-            <button className="px-2 py-1 text-sm border rounded hover:bg-gray-100 dark:hover:bg-gray-700 dark:border-gray-600 dark:text-gray-200" onClick={onClose} title="关闭 (ESC)">关闭</button>
+            <button className="px-2 py-1 text-sm border border-slate-200 rounded hover:bg-slate-100 hover:border-slate-300 dark:hover:bg-slate-700 dark:border-slate-600 dark:text-slate-200 transition-all" onClick={onClose} title="关闭 (ESC)">关闭</button>
           </div>
         </div>
         <div className="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900 grid place-items-center p-4">
           {loading ? (
             <div className="flex flex-col items-center">
-              <div className="w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div className="w-48 h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                 <div 
-                  className="h-full bg-blue-600 transition-all duration-300" 
+                  className="h-full bg-primary transition-all duration-300" 
                   style={{ width: `${loadingProgress}%` }}
                 ></div>
               </div>
               <div className="text-gray-500 dark:text-gray-400 text-sm mt-2">加载中... {loadingProgress}%</div>
             </div>
           ) : error ? (
-            <div className="text-red-600 text-sm p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+            <div className="text-red-500 dark:text-red-400 text-sm p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
               <div className="font-medium mb-1">加载错误</div>
               {error}
             </div>

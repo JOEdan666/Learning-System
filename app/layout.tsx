@@ -76,12 +76,13 @@ export default function RootLayout({
             duration: 3000,
             style: {
               background: '#fff',
-              color: '#333',
+              color: 'rgb(var(--foreground-rgb))',
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
               borderRadius: '8px',
               padding: '12px 16px',
+              border: '1px solid var(--color-primary-light)',
             },
-            success: { iconTheme: { primary: '#10B981', secondary: '#fff' } },
+            success: { iconTheme: { primary: 'var(--color-primary)', secondary: '#fff' } },
             error:   { iconTheme: { primary: '#EF4444', secondary: '#fff' } },
           }}
         />

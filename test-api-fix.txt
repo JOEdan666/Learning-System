@@ -1,0 +1,10 @@
+测试API修复
+
+这个文件用于测试修复后的知识库保存API。
+
+修复内容：
+- 使用 createManyAndReturn 替代 createMany
+- 确保返回实际创建的项目数组
+- 修复前端 savedItems 不可迭代的错误
+
+测试完成后可以删除此文件。

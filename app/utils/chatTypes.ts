@@ -3,6 +3,8 @@ export type Role = 'system' | 'user' | 'assistant';
 export interface ChatMessage {
   role: Role;
   content: string;
+  image?: string; // 可选的base64图片数据
+  timestamp?: string; // 可选的时间戳
 }
 
 // 把宽松的 { role: string; content: string }[] 转成严格的 ChatMessage[]

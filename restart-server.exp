@@ -1,0 +1,47 @@
+#!/usr/bin/expect -f
+
+# 服务器信息
+set server_ip "120.24.22.244"
+set username "root"
+set password "Lyc001286"
+set project_path "/var/www/learning-system"
+
+# 连接到服务器
+spawn ssh $username@$server_ip
+expect "password:"
+send "$password\r"
+
+# 等待登录完成
+expect "# "
+
+# 进入项目目录
+send "cd $project_path\r"
+expect "# "
+
+# 检查当前PM2状态
+send "pm2 list\r"
+expect "# "
+
+# 重启learning-system服务
+send "pm2 restart learning-system\r"
+expect "# "
+
+# 等待服务启动
+send "sleep 5\r"
+expect "# "
+
+# 再次检查PM2状态
+send "pm2 list\r"
+expect "# "
+
+# 检查服务是否正常响应
+send "curl -s http://localhost:3000/api/check-env\r"
+expect "# "
+
+# 测试API功能
+send "curl -X POST http://localhost:3000/api/openai-chat -H \"Content-Type: application/json\" -d '{\"messages\":[{\"role\":\"user\",\"content\":\"测试\"}]}' | head -3\r"
+expect "# "
+
+# 退出
+send "exit\r"
+expect eof

@@ -1,9 +1,13 @@
 // @ts-nocheck
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
-import AIChat from './components/AIChat';
+import { useRouter } from 'next/navigation'
+import UnifiedChat from './components/UnifiedChat';
 import KnowledgeBase from './components/KnowledgeBase';
 import { LearningItem, SUBJECTS } from './types';
+
+// 学习闭环页面URL常量
+const LEARNING_LOOP_URL = '/test-jys-learning';
 
 export default function Home() {
   // 状态管理
@@ -14,6 +18,8 @@ export default function Home() {
   const [isStorageAvailable, setIsStorageAvailable] = useState(true)
   // 知识库条目（来自 KnowledgeBase 组件）
   const [kbItems, setKbItems] = useState<any[]>([])
+  // 知识笔记输出内容
+  const [knowledgeNotes, setKnowledgeNotes] = useState<string>('')
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [lastSavedTime, setLastSavedTime] = useState<string>('')
@@ -25,7 +31,19 @@ export default function Home() {
     return false
   })
   const [isMobileView, setIsMobileView] = useState(false)
+  const [showChat, setShowChat] = useState(false)
+  const router = useRouter();
   
+  // 打开统一对话界面
+  const handleOpenChat = () => {
+    setShowChat(true);
+  };
+
+  // 关闭对话界面
+  const handleCloseChat = () => {
+    setShowChat(false);
+  };
+
   // 检测响应式设计
   useEffect(() => {
     const checkMobileView = () => {
@@ -404,12 +422,11 @@ export default function Home() {
 
 
   // 处理保存操作
-  const handleSave = () => {
+  const handleSave = async () => {
     if (inputText.trim()) {
       setIsSaving(true)
       
-      // 模拟异步保存操作
-      setTimeout(() => {
+      try {
         const newItem: LearningItem = {
           id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           text: inputText.trim(),
@@ -417,9 +434,13 @@ export default function Home() {
           createdAt: new Date().toISOString()
         };
         
+        // 更新本地状态
         setSavedItems((prevItems: LearningItem[]) => [...prevItems, newItem])
+        
+        // 智能保存到系统化学习对话
+        await saveToSystematicLearning(newItem);
+        
         setInputText('')
-        // 保持当前选择的科目，不重置
         setIsSaving(false)
         
         // 保存后自动聚焦到输入框
@@ -436,9 +457,117 @@ export default function Home() {
             }
           }, 500)
         }
-      }, 500)
+      } catch (error) {
+        console.error('保存失败:', error);
+        setIsSaving(false)
+      }
     }
   }
+
+  // 智能保存到系统化学习对话
+  const saveToSystematicLearning = async (item: LearningItem) => {
+    try {
+      const { ConversationService } = await import('./services/conversationService');
+      const conversationService = ConversationService.getInstance();
+      
+      // 检查是否已有该学科的今日学习对话
+      const today = new Date().toLocaleDateString('zh-CN');
+      const conversationTitle = `${item.subject}学习笔记 - ${today}`;
+      
+      // 获取所有对话，查找今日该学科的对话
+      const allConversations = conversationService.getAllConversations();
+      let targetConversation = allConversations.find(conv => 
+        conv.title === conversationTitle && 
+        conv.type === 'learning' &&
+        conv.subject === item.subject
+      );
+      
+      // 创建智能化的学习消息
+      const learningMessage = {
+        role: 'user' as const,
+        content: `📝 学习笔记记录：\n\n**学科：** ${item.subject}\n**内容：** ${item.text}\n**记录时间：** ${new Date().toLocaleString('zh-CN')}`
+      };
+      
+      const aiResponse = {
+        role: 'assistant' as const,
+        content: `✅ 已记录您的${item.subject}学习笔记！\n\n**学习内容分析：**\n${generateLearningAnalysis(item.text, item.subject)}\n\n**建议下一步：**\n${generateNextStepSuggestion(item.text, item.subject)}`
+      };
+      
+      if (!targetConversation) {
+        // 创建新的学习对话
+        const createRequest = {
+          type: 'learning' as const,
+          title: conversationTitle,
+          subject: item.subject,
+          topic: '学习笔记整理',
+          initialMessage: learningMessage
+        };
+        
+        targetConversation = await conversationService.createConversation(createRequest);
+        await conversationService.addMessage(targetConversation.id, aiResponse);
+      } else {
+        // 添加到现有对话
+        await conversationService.addMessage(targetConversation.id, learningMessage);
+        await conversationService.addMessage(targetConversation.id, aiResponse);
+      }
+      
+      console.log('学习内容已智能保存到系统化学习对话:', targetConversation.id);
+    } catch (error) {
+      console.error('保存到系统化学习对话失败:', error);
+      // 不影响主要保存流程，只是记录错误
+    }
+  };
+
+  // 生成学习内容分析
+  const generateLearningAnalysis = (content: string, subject: string): string => {
+    const contentLength = content.length;
+    const hasFormulas = /[=+\-*/()^√∫∑]/.test(content);
+    const hasKeywords = /定义|定理|公式|方法|步骤|原理|概念/.test(content);
+    
+    let analysis = '';
+    
+    if (contentLength > 100) {
+      analysis += '• 内容较为详细，建议分段复习\n';
+    } else {
+      analysis += '• 内容简洁明了，适合快速回顾\n';
+    }
+    
+    if (hasFormulas) {
+      analysis += '• 包含数学公式或符号，建议多练习计算\n';
+    }
+    
+    if (hasKeywords) {
+      analysis += '• 包含重要概念，建议深入理解并记忆\n';
+    }
+    
+    if (subject === '数学') {
+      analysis += '• 数学学习建议：理解概念→练习例题→总结方法\n';
+    } else if (subject === '物理') {
+      analysis += '• 物理学习建议：掌握原理→分析过程→应用实践\n';
+    } else if (subject === '化学') {
+      analysis += '• 化学学习建议：记忆基础→理解反应→实验验证\n';
+    }
+    
+    return analysis;
+  };
+
+  // 生成下一步学习建议
+  const generateNextStepSuggestion = (content: string, subject: string): string => {
+    const suggestions = [
+      '复习相关基础概念',
+      '寻找类似例题进行练习',
+      '制作思维导图整理知识点',
+    ];
+    
+    // 根据内容和学科智能选择建议
+    if (content.includes('公式') || content.includes('定理')) {
+      return '• 多做相关练习题巩固公式应用\n• 理解公式推导过程\n• 总结公式使用条件';
+    } else if (content.includes('概念') || content.includes('定义')) {
+      return '• 用自己的话重新表述概念\n• 寻找生活中的实际例子\n• 与相关概念进行对比学习';
+    } else {
+      return suggestions.slice(0, 3).map(s => `• ${s}`).join('\n');
+    }
+  };
 
   // 处理键盘事件
   const handleKeyDown = (e: any) => {
@@ -477,16 +606,9 @@ export default function Home() {
     }
   };
 
-  // AI聊天相关状态和函数
-  const [showAIChat, setShowAIChat] = useState(false);
 
-  const handleOpenAIChat = () => {
-    setShowAIChat(true);
-  };
 
-  const handleCloseAIChat = () => {
-    setShowAIChat(false);
-  };
+
 
   // 将知识库条目转换为 AIChat 可用的 LearningItem 结构
   const kbAsLearningItems = (kbItems || [])
@@ -533,115 +655,164 @@ export default function Home() {
         <p className={`${isDarkMode ? 'text-gray-300' : 'text-blue-200'} text-lg font-medium tracking-wide transition-all duration-300 hover:text-blue-100`}>
           以自学为基础，以生产为导向
         </p>
-      </header>
-      
-      {/* 主要内容区域 */}
-      <div className="flex-grow flex gap-4">
-        {/* 左侧 - 今日学习提示 */}
-        <aside className="hidden md:block w-64 shrink-0 order-0">
-          <div className="sticky top-6">
-            <div className="bg-white/95 border border-blue-200 rounded-lg p-4 shadow-md hover:shadow-lg transition-all duration-300 backdrop-blur-md transform hover:-translate-y-0.5">
-              <h3 className="text-base font-semibold text-blue-600 mb-2 flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+        {/* 开始学习按钮 */}
+        <div className="mt-6 flex justify-center">
+          <button
+            onClick={handleOpenChat}
+            className="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-full shadow-lg hover:from-blue-600 hover:to-purple-700 hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-opacity-50 text-lg"
+          >
+            开始学习
+          </button>
+        </div>
+        
+        {/* 知识库和已保存内容 - 三栏布局 */}
+        <div className="mt-8 flex items-start max-w-6xl mx-auto px-8 gap-6">
+          {/* 左栏 - 知识库（三分之二大小，向左） */}
+          <div className="flex-shrink-0 transform scale-75 origin-top-left w-1/3">
+            <KnowledgeBase onItemsChange={setKbItems} hideParsingText={true} />
+          </div>
+          
+          {/* 中间 - 不做第一做唯一模块和知识笔记输出 */}
+          <div className="flex-1 flex flex-col items-center space-y-6">
+            {/* 不做第一做唯一模块 */}
+            <div className="bg-white/95 border border-blue-200 rounded-lg p-4 shadow-md hover:shadow-lg transition-all duration-300 backdrop-blur-md transform hover:-translate-y-0.5 w-80">
+              <h3 className="text-base font-semibold text-primary mb-2 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                 </svg>
                 不做第一做唯一 · 2035去火星🫵
               </h3>
               <p className="text-gray-700 mb-3 text-sm leading-relaxed">
-                这是一个AI时代，更是学习者和生产者的时代😎
+                这是一个AI时代，更是学习者和生产者的时代
               </p>
               <div className="flex flex-wrap gap-2">
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-medium">
                   自学
                 </span>
-                <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-medium">
                   积累
                 </span>
-                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs font-medium">
                   思考
                 </span>
               </div>
             </div>
+            
+            {/* 知识笔记输出区域 - GPT风格气泡 */}
+            {knowledgeNotes && (
+              <div className="w-80 max-w-md">
+                <div className="relative">
+                  {/* GPT风格的气泡：左侧圆角，右侧半圆 */}
+                  <div className="bg-gradient-to-r from-blue-50 to-blue-100 text-gray-800 px-4 py-3 rounded-l-2xl rounded-tr-2xl rounded-br-sm relative shadow-sm">
+                    <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                      {knowledgeNotes}
+                    </div>
+                    {/* 右侧半圆形装饰 */}
+                    <div className="absolute -right-2 top-1/2 transform -translate-y-1/2 w-4 h-8 bg-gradient-to-r from-blue-100 to-blue-50 rounded-r-full"></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* 已保存内容 - ChatGPT风格气泡 */}
+            {savedItems.length > 0 && (
+              <div className="w-80 max-w-md animate-fade-in">
+                <div className="relative">
+                  {/* ChatGPT风格的气泡：左侧圆角，右侧半圆 */}
+                  <div className="bg-gradient-to-r from-green-50 to-green-100 text-gray-800 px-4 py-3 rounded-l-2xl rounded-tr-2xl rounded-br-sm relative shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-sm font-semibold text-green-700 flex items-center gap-1">
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-200 text-green-700 text-xs font-medium">
+                          📝
+                        </span>
+                        已保存的内容 ({savedItems.length})
+                      </h2>
+                      <button 
+                        onClick={() => {
+                          setSavedItems([]);
+                          try {
+                            if (isStorageAvailable) {
+                              localStorage.removeItem(STORAGE_KEY);
+                              localStorage.removeItem(STORAGE_BACKUP_KEY);
+                              sessionStorage.removeItem(STORAGE_KEY);
+                              sessionStorage.removeItem(STORAGE_BACKUP_KEY);
+                              console.log('所有项目已删除，已清除所有存储中的数据');
+                            }
+                          } catch (error) {
+                            console.error('清空项目后立即保存失败:', error instanceof Error ? error.message : String(error));
+                          }
+                        }}
+                        className="text-sm text-gray-500 hover:text-red-500 transition-colors"
+                        aria-label="清空所有内容"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                    <ul className="space-y-1.5 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-green-200 scrollbar-track-transparent">
+                      {savedItems.map((item: LearningItem, index: number) => (
+                        <li key={item.id} className="flex items-start p-1.5 rounded-md bg-white/50 text-gray-700 hover:bg-white/70 transition-all duration-200 group relative max-w-sm">
+                          <span className="inline-flex items-center justify-center w-3 h-3 rounded-full bg-green-200 text-green-700 text-xs font-medium mt-0.5 flex-shrink-0 mr-1.5">
+                            {index + 1}
+                          </span>
+                          <div className="flex-grow min-w-0">
+                            <span className="whitespace-pre-wrap break-words text-xs leading-relaxed">
+                              <span className="inline-block px-1.5 py-0.5 bg-green-200 text-green-700 text-xs rounded-md mr-1">
+                                {item.subject}
+                              </span>
+                              {item.text}
+                            </span>
+                          </div>
+                          <button 
+                            onClick={() => handleDeleteItem(index)}
+                            className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                            aria-label={`删除第${index + 1}项`}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-gray-400 hover:text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {/* 右侧半圆形装饰 */}
+                    <div className="absolute -right-2 top-1/2 transform -translate-y-1/2 w-4 h-8 bg-gradient-to-r from-green-100 to-green-50 rounded-r-full"></div>
+                  </div>
+                </div>
+              </div>
+            )}
+ 
+          </div>
+          
+          {/* 右栏内容 - 现在为空 */}
+          <div className="flex-shrink-0 w-80">
+          </div>
+          
+
+        </div>
+      </header>
+      
+      {/* 主要内容区域 */}
+      <div className="flex-grow flex gap-4">
+        {/* 左侧边栏 - 现在为空 */}
+        <aside className="hidden md:block w-64 shrink-0 order-0">
+          <div className="sticky top-6">
+            {/* 模块已移动到左栏正中间 */}
           </div>
         </aside>
         
         {/* 中间主内容区域 - 记录学习板块 */}
         <main className="flex-grow order-1 flex flex-col items-center">
           {/* 记录学习的板块 - 居中大小适中 */}
-          <div className="w-full max-w-2xl mx-auto my-6">
-            {/* 知识库上传与管理 */}
-            <div className="mb-6">
-              <KnowledgeBase onItemsChange={setKbItems} />
-            </div>
+          <div className="w-full max-w-xl mx-auto my-6">
             {/* 移动端已保存内容 */}
             <div className="md:hidden mb-6">
               {savedItems.length > 0 && (
-                <div className="animate-fade-in bg-white/70 border border-purple-200 rounded-lg p-3 shadow-md hover:shadow-lg transition-all duration-300 backdrop-blur-md">
+                <div className="animate-fade-in bg-slate-50/70 border border-slate-200 dark:border-slate-700 rounded-lg p-3 shadow-md hover:shadow-lg transition-all duration-300 backdrop-blur-md">
                   <div className="flex items-center justify-between mb-2">
-                    <h2 className="text-sm font-semibold text-purple-600 flex items-center gap-1">
-                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-purple-100 text-purple-600 text-xs font-medium">
-                        📝
-                      </span>
-                      已保存的内容 ({savedItems.length})
-                    </h2>
-                    <button 
-                      onClick={() => {
-                        setSavedItems([]);
-                        try {
-                          if (isStorageAvailable) {
-                            localStorage.removeItem(STORAGE_KEY);
-                            localStorage.removeItem(STORAGE_BACKUP_KEY);
-                            sessionStorage.removeItem(STORAGE_KEY);
-                            sessionStorage.removeItem(STORAGE_BACKUP_KEY);
-                            console.log('所有项目已清空，已清除所有存储中的数据');
-                          }
-                        } catch (error) {
-                          console.error('清空项目后立即保存失败:', error instanceof Error ? error.message : String(error));
-                        }
-                      }}
-                      className="text-xs text-gray-500 hover:text-red-500 transition-colors"
-                      aria-label="清空所有内容"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </div>
-                  <ul className="space-y-2 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-purple-200 dark:scrollbar-thumb-purple-700 scrollbar-track-transparent">
-                    {savedItems.map((item: LearningItem, index: number) => (
-                      <li key={item.id} className="flex items-start p-2 rounded-md bg-purple-50 text-gray-700 hover:bg-purple-100/50 transition-all duration-200 group relative">
-                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-purple-100 text-purple-600 text-xs font-medium mt-0.5">
-                        {index + 1}
-                      </span>
-                        <div className="flex-grow">
-                          <span className="inline-block px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-md mb-1">
-                            {item.subject}
-                          </span>
-                          <span className="flex-grow whitespace-pre-wrap break-words text-xs group-hover:text-purple-600 transition-colors">{item.text}</span>
-                        </div>
-                        <button 
-                          onClick={() => handleDeleteItem(index)}
-                          className="absolute right-1 top-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                          aria-label={`删除第${index + 1}项`}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-gray-400 hover:text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-            
-            {/* 已保存内容（桌面端） */}
-            <div className="hidden md:block">
-              {savedItems.length > 0 && (
-                <div className="animate-fade-in bg-white/70 border border-purple-200 rounded-lg p-4 shadow-md hover:shadow-lg transition-all duration-300 backdrop-blur-md mb-6">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-sm font-semibold text-purple-600 flex items-center gap-1">
-                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-purple-100 text-purple-600 text-xs font-medium">
+                    <h2 className="text-sm font-semibold text-primary flex items-center gap-1">
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary/10 text-primary text-xs font-medium">
                         📝
                       </span>
                       已保存的内容 ({savedItems.length})
@@ -669,24 +840,24 @@ export default function Home() {
                       </svg>
                     </button>
                   </div>
-                  <ul className="space-y-3 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-purple-200 dark:scrollbar-thumb-purple-700 scrollbar-track-transparent">
+                  <ul className="space-y-2 max-h-[180px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-purple-200 dark:scrollbar-thumb-purple-700 scrollbar-track-transparent">
                     {savedItems.map((item: LearningItem, index: number) => (
-                      <li key={item.id} className="flex items-start p-3 rounded-md bg-purple-50 text-gray-700 hover:bg-purple-100/50 transition-all duration-200 group relative">
-                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-purple-100 text-purple-600 text-xs font-medium mt-0.5">
+                      <li key={item.id} className="flex items-start p-2 rounded-md bg-slate-100/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 hover:bg-primary/5 transition-all duration-200 group relative">
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-primary/10 text-primary text-xs font-medium mt-0.5">
                         {index + 1}
                       </span>
-                        <div className="flex-grow ml-2">
-                          <span className="inline-block px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-md mb-1.5">
+                        <div className="flex-grow">
+                          <span className="inline-block px-1.5 py-0.5 bg-primary/10 text-primary text-xs rounded-md mb-1">
                             {item.subject}
                           </span>
-                          <span className="flex-grow whitespace-pre-wrap break-words text-sm group-hover:text-purple-600 transition-colors">{item.text}</span>
+                          <span className="flex-grow whitespace-pre-wrap break-words text-xs group-hover:text-primary transition-colors">{item.text}</span>
                         </div>
                         <button 
                           onClick={() => handleDeleteItem(index)}
-                          className="absolute right-2 top-2.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="absolute right-1 top-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
                           aria-label={`删除第${index + 1}项`}
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400 hover:text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-gray-400 hover:text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                           </svg>
                         </button>
@@ -696,14 +867,16 @@ export default function Home() {
                 </div>
               )}
             </div>
+            
+
           </div>
         </main>
       </div>
       
       {/* AI助手按钮 */}
       <button 
-        onClick={handleOpenAIChat}
-        className="fixed bottom-20 right-4 bg-blue-500 text-white p-3 rounded-full shadow-lg hover:bg-blue-600 z-10"
+        onClick={handleOpenChat}
+        className="fixed bottom-20 right-4 bg-primary text-white p-3 rounded-full shadow-lg hover:bg-primary/90 active:bg-primary/80 transition-all duration-300 z-10"
         title="打开AI助手"
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -712,8 +885,8 @@ export default function Home() {
       </button>
 
       {/* 固定在底部的输入区域 - 调小尺寸 */}
-      <div className="fixed bottom-0 left-0 right-0 p-3 border-t border-gray-200 bg-white/80 backdrop-blur-sm">
-        <div className="w-full max-w-3xl mx-auto">
+      <div className="fixed bottom-4 left-0 right-0 p-4 border-t border-gray-200 bg-white/80 backdrop-blur-sm">
+        <div className="w-full max-w-2xl mx-auto">
           {/* 分类选择下拉菜单 */}
           <div className="mb-2">
             <label htmlFor="subject-select" className="text-xs text-gray-500 mr-2">选择科目：</label>
@@ -722,7 +895,7 @@ export default function Home() {
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value)}
               disabled={isSaving}
-              className={`px-3 py-1.5 rounded-md border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300 ${isSaving ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+              className={`px-3 py-1.5 rounded-md border border-slate-200 bg-white dark:bg-slate-800 dark:text-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-300 ${isSaving ? 'bg-slate-100 dark:bg-slate-700 cursor-not-allowed' : ''}`}
             >
               {SUBJECTS.map((subject) => (
                 <option key={subject} value={subject}>
@@ -743,7 +916,7 @@ export default function Home() {
                 // 自动调整高度 - 更平滑的GPT风格
                 if (inputRef.current) {
                   inputRef.current.style.height = 'auto';
-                  const newHeight = Math.max(40, Math.min(inputRef.current.scrollHeight, 150));
+                  const newHeight = Math.max(32, Math.min(inputRef.current.scrollHeight, 100));
                   inputRef.current.style.height = newHeight + 'px';
                 }
               }}
@@ -751,16 +924,16 @@ export default function Home() {
                 handleKeyDown(e);
               }}
               placeholder="输入你的学习心得、思考或灵感..."
-              className="w-full pl-3 pr-14 py-2 rounded-lg border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-sm transition-all duration-300 shadow-sm hover:shadow"
+              className="w-full pl-4 pr-12 py-2 rounded-2xl border border-slate-200 bg-white dark:bg-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary resize-none text-sm transition-all duration-300 shadow-sm hover:shadow-md mx-auto"
               disabled={isSaving}
-              style={{ height: '40px', overflow: 'hidden' }}
+              style={{ height: '32px', overflow: 'hidden' }}
             />
             
             {/* 发送按钮 - GPT风格的右下角按钮 */}
             <button
               onClick={handleSave}
               disabled={isSaving || inputText.trim().length === 0}
-              className={`absolute right-3 bottom-3 w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-105 ${isSaving || inputText.trim().length === 0 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow hover:shadow-md'}`}
+              className={`absolute right-3 bottom-3 w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-105 ${isSaving || inputText.trim().length === 0 ? 'bg-slate-200 dark:bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-primary text-white hover:bg-primary/90 active:bg-primary/80 shadow hover:shadow-md'}`}
               aria-label="发送"
             >
               {isSaving ? (
@@ -792,11 +965,11 @@ export default function Home() {
       {/* 底部空间，确保内容不被输入框遮挡 */}
       <div className="h-40"></div>
       
-      {/* AI聊天组件 */}
-      {showAIChat && (
-        <AIChat 
+      {/* 统一对话组件 */}
+      {showChat && (
+        <UnifiedChat 
           savedItems={mergedSavedItems} 
-          onClose={handleCloseAIChat} 
+          onClose={handleCloseChat} 
         />
       )}
     </div>
