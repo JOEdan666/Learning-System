@@ -68,17 +68,44 @@ const renderContentWithTables = (content: string) => {
   const hasTable = parseMarkdownTable(content) !== null;
   
   if (hasTable) {
-    // 如果包含表格，使用TableRenderer处理表格，ReactMarkdown处理其他内容
-    const tableRegex = /(\|.+\|\n\|[-\s|:]+\|\n(?:\|.+\|\n?)*)/g;
-    const parts = content.split(tableRegex);
+    // 如果包含表格，使用改进的分割逻辑
+    const tableRegex = /^\s*\|(.+)\|\s*\n\s*\|[-\s|:]+\|\s*\n((?:\s*\|.+\|\s*\n?)*)/gm;
+    let lastIndex = 0;
+    const parts = [];
+    let match;
+    
+    // 重置正则表达式的lastIndex
+    tableRegex.lastIndex = 0;
+    
+    while ((match = tableRegex.exec(content)) !== null) {
+      // 添加表格前的内容
+      if (match.index > lastIndex) {
+        const beforeTable = content.substring(lastIndex, match.index).trim();
+        if (beforeTable) {
+          parts.push({ type: 'markdown', content: beforeTable });
+        }
+      }
+      
+      // 添加表格内容
+      parts.push({ type: 'table', content: match[0] });
+      
+      lastIndex = match.index + match[0].length;
+    }
+    
+    // 添加最后一个表格后的内容
+    if (lastIndex < content.length) {
+      const afterTable = content.substring(lastIndex).trim();
+      if (afterTable) {
+        parts.push({ type: 'markdown', content: afterTable });
+      }
+    }
     
     return (
       <div>
         {parts.map((part, index) => {
-          // 检查这部分是否是表格
-          if (parseMarkdownTable(part)) {
-            return <TableRenderer key={index} content={part} />;
-          } else if (part.trim()) {
+          if (part.type === 'table') {
+            return <TableRenderer key={index} content={part.content} />;
+          } else {
             // 非表格内容使用ReactMarkdown渲染
             return (
               <ReactMarkdown
@@ -87,11 +114,10 @@ const renderContentWithTables = (content: string) => {
                 rehypePlugins={[rehypeKatex]}
                 components={customComponents}
               >
-                {part}
+                {part.content}
               </ReactMarkdown>
             );
           }
-          return null;
         })}
       </div>
     );

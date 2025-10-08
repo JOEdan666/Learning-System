@@ -632,23 +632,7 @@ export default function Home() {
     >
       {/* 头部 */}
       <header className="text-center mb-8 animate-fade-in relative">
-        <div className="absolute right-4 top-2 flex items-center space-x-2">
-          <button 
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            className="p-2 rounded-full bg-white/20 backdrop-blur-md hover:bg-white/30 transition-all duration-300"
-            aria-label={isDarkMode ? "切换到亮色模式" : "切换到暗色模式"}
-          >
-            {isDarkMode ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-yellow-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-              </svg>
-            )}
-          </button>
-        </div>
+
         <h1 className={`text-3xl sm:text-4xl md:text-5xl font-bold mb-2 animate-gradient bg-clip-text text-transparent ${isDarkMode ? 'bg-gradient-to-r from-purple-400 to-pink-400' : 'bg-gradient-to-r from-blue-500 to-cyan-400'} transition-all duration-500 hover:scale-105`}>
           自学系统
         </h1>
@@ -656,12 +640,17 @@ export default function Home() {
           以自学为基础，以生产为导向
         </p>
         {/* 开始学习按钮 */}
-        <div className="mt-6 flex justify-center">
+        <div className="mt-6 flex flex-col items-center">
           <button
             onClick={handleOpenChat}
-            className="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-full shadow-lg hover:from-blue-600 hover:to-purple-700 hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-opacity-50 text-lg"
+            className="px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-full shadow-lg hover:from-blue-600 hover:to-purple-700 hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-opacity-50 flex flex-col items-center gap-1"
           >
-            开始学习
+            <div className="text-sm flex items-center gap-2">
+              🎯 点击这里，开启今日学习任务
+            </div>
+            <div className="text-xs text-white/90 font-normal">
+              专业教练将为你自动生成讲解、提问、小测与复盘。
+            </div>
           </button>
         </div>
         
@@ -873,16 +862,7 @@ export default function Home() {
         </main>
       </div>
       
-      {/* AI助手按钮 */}
-      <button 
-        onClick={handleOpenChat}
-        className="fixed bottom-20 right-4 bg-primary text-white p-3 rounded-full shadow-lg hover:bg-primary/90 active:bg-primary/80 transition-all duration-300 z-10"
-        title="打开AI助手"
-      >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-        </svg>
-      </button>
+
 
       {/* 固定在底部的输入区域 - 调小尺寸 */}
       <div className="fixed bottom-4 left-0 right-0 p-4 border-t border-gray-200 bg-white/80 backdrop-blur-sm">

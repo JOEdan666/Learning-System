@@ -13,8 +13,8 @@ interface TableRendererProps {
 
 // 解析Markdown表格的函数
 const parseMarkdownTable = (content: string): TableData | null => {
-  // 匹配Markdown表格格式
-  const tableRegex = /\|(.+)\|\n\|[-\s|:]+\|\n((?:\|.+\|\n?)*)/g;
+  // 改进的Markdown表格匹配正则表达式
+  const tableRegex = /^\s*\|(.+)\|\s*\n\s*\|[-\s|:]+\|\s*\n((?:\s*\|.+\|\s*\n?)*)/gm;
   const match = tableRegex.exec(content);
   
   if (!match) return null;
@@ -31,12 +31,16 @@ const parseMarkdownTable = (content: string): TableData | null => {
   const rows = rowsSection
     .trim()
     .split('\n')
-    .map(row => 
-      row.split('|')
+    .map(row => {
+      if (!row.trim()) return [];
+      return row.split('|')
         .map(cell => cell.trim())
-        .filter(cell => cell.length > 0)
-    )
+        .filter(cell => cell.length > 0);
+    })
     .filter(row => row.length > 0);
+  
+  // 验证表格数据的有效性
+  if (headers.length === 0 || rows.length === 0) return null;
   
   return { headers, rows };
 };
@@ -89,38 +93,49 @@ const TableRenderer: React.FC<TableRendererProps> = ({ content }) => {
   const tableData = parseMarkdownTable(content);
   
   if (!tableData) {
-    // 如果没有表格，返回原始内容
+    // 如果没有表格，返回原始内容（不使用dangerouslySetInnerHTML）
     return (
-      <div 
-        className="whitespace-pre-wrap"
-        dangerouslySetInnerHTML={{ __html: content }}
-      />
+      <div className="whitespace-pre-wrap">
+        {content}
+      </div>
     );
   }
   
-  // 分离表格前后的内容
-  const tableRegex = /\|(.+)\|\n\|[-\s|:]+\|\n((?:\|.+\|\n?)*)/g;
-  const parts = content.split(tableRegex);
+  // 改进的表格前后内容分离逻辑
+  const tableRegex = /^\s*\|(.+)\|\s*\n\s*\|[-\s|:]+\|\s*\n((?:\s*\|.+\|\s*\n?)*)/gm;
+  const match = tableRegex.exec(content);
+  
+  if (!match) {
+    return (
+      <div className="whitespace-pre-wrap">
+        {content}
+      </div>
+    );
+  }
+  
+  const tableStart = match.index;
+  const tableEnd = tableStart + match[0].length;
+  
+  const beforeTable = content.substring(0, tableStart).trim();
+  const afterTable = content.substring(tableEnd).trim();
   
   return (
     <div>
       {/* 表格前的内容 */}
-      {parts[0] && (
-        <div 
-          className="whitespace-pre-wrap mb-4"
-          dangerouslySetInnerHTML={{ __html: parts[0] }}
-        />
+      {beforeTable && (
+        <div className="whitespace-pre-wrap mb-4">
+          {beforeTable}
+        </div>
       )}
       
       {/* 渲染表格 */}
       <Table data={tableData} />
       
       {/* 表格后的内容 */}
-      {parts[parts.length - 1] && (
-        <div 
-          className="whitespace-pre-wrap mt-4"
-          dangerouslySetInnerHTML={{ __html: parts[parts.length - 1] }}
-        />
+      {afterTable && (
+        <div className="whitespace-pre-wrap mt-4">
+          {afterTable}
+        </div>
       )}
     </div>
   );

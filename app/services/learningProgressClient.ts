@@ -13,6 +13,7 @@ export interface LearningProgressData {
   finalScore?: number;
   feedback?: string;
   reviewNotes?: string;
+  aiSummary?: string; // AI生成的学习总结
   quizQuestions?: QuizQuestionData[];
   userAnswers?: UserAnswerData[];
   stats?: LearningStatsData;

@@ -1,0 +1,67 @@
+# 🔑 Vercel 环境变量配置清单
+# 复制以下内容到 Vercel 项目设置 → Environment Variables
+
+# ==========================================
+# 📊 数据库配置 (必需)
+# ==========================================
+DATABASE_URL
+postgresql://JOEdan:962222mini%23@pgm-wz9e83um4mxsop2yvo.pg.rds.aliyuncs.com:5432/pgm-wz9e83um4mxsop2y?schema=public
+
+# ==========================================
+# 🤖 AI服务配置 (必需)
+# ==========================================
+OPENAI_API_KEY
+sk-71380376e8c2418f82c5f05bc3689e1a
+
+OPENAI_BASE_URL
+https://api.deepseek.com/v1
+
+OPENAI_MODEL
+deepseek-chat
+
+# ==========================================
+# 🔐 认证配置 (必需)
+# ==========================================
+NEXTAUTH_URL
+https://your-project-name.vercel.app
+
+NEXTAUTH_SECRET
+your-random-secret-string-here
+
+# ==========================================
+# 🌐 应用配置
+# ==========================================
+NODE_ENV
+production
+
+NEXT_PUBLIC_SITE_URL
+https://your-project-name.vercel.app
+
+# ==========================================
+# 🔧 科大讯飞配置 (可选)
+# ==========================================
+NEXT_PUBLIC_XUNFEI_APP_ID
+4b9be262
+
+NEXT_PUBLIC_XUNFEI_API_KEY
+ef3053ece3485e6ce1f81dbbc5911421
+
+NEXT_PUBLIC_XUNFEI_API_SECRET
+ZDM3YTQ4ZDMyMGQ0NDcyN2IyMDY1OTI0
+
+NEXT_PUBLIC_XUNFEI_DOMAIN
+lite
+
+NEXT_PUBLIC_XUNFEI_API_URL
+wss://spark-api.xf-yun.com/v1.1/chat
+
+NEXT_PUBLIC_XUNFEI_DEBUG
+false
+
+# ==========================================
+# 📝 配置说明
+# ==========================================
+# 1. 将每个变量名和值分别复制到 Vercel
+# 2. 注意替换 your-project-name 为实际项目名
+# 3. NEXTAUTH_SECRET 请生成随机字符串
+# 4. 配置完成后点击 "Redeploy" 重新部署

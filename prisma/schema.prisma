@@ -49,6 +49,7 @@ model LearningSession {
   grade            String?
   region           String?
   reviewNotes      String?
+  aiSummary        String?
   quizQuestions    QuizQuestion[]
   userAnswers      UserAnswer[]
 

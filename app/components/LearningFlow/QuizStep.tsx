@@ -42,72 +42,85 @@ const generateQuestionsFromAPI = async (content: string, topic?: string, region?
           messages: [
             {
               role: 'system',
-              content: `你是一位资深的${grade || '中学'}${subject || '数学'}教师和考试专家，具有丰富的命题经验。请根据提供的学习内容和考纲要求，生成10道高质量的考试题目。
-
-## 🎯 命题原则
-1. **科学性**：题目内容必须准确无误，符合学科规律
-2. **针对性**：紧扣学习内容，考查核心知识点
-3. **层次性**：难度递进，覆盖不同认知层次
-4. **实用性**：贴近实际考试，具有实战价值
-5. **创新性**：避免陈旧题型，体现新课标要求
-
-## 📋 题目要求
-**题目类型分布：**
-- 2道选择题：考查概念理解、判断能力
-- 5道简答题：考查计算能力、分析能力
-- 3道论述题：考查综合应用、创新思维
-
-**质量标准：**
-- 选择题：选项设计巧妙，干扰项有一定迷惑性但不偏离主题
-- 简答题：有明确的解题步骤，考查学生的逻辑思维
-- 论述题：开放性适中，既有标准答案又允许创新表达
-- 所有题目：语言表达清晰，避免歧义
-
-**难度控制：**
-- 基础题（30%）：直接考查基本概念和公式
-- 中等题（50%）：需要一定的分析和计算
-- 提高题（20%）：综合性强，需要深入思考
-
-**地区特色：**
-- 结合${region || '通用'}地区的考试特点和命题风格
-- 参考当地教材版本和考试要求
-
-请严格按照以下JSON格式输出，确保格式完全正确：
-{
-  "questions": [
-    {
-      "id": 1,
-      "question": "题目内容（要求表述清晰、准确）",
-      "type": "multiple_choice",
-      "options": ["A. 选项1", "B. 选项2", "C. 选项3", "D. 选项4"],
-      "correctAnswer": "A. 选项1",
-      "explanation": "详细解析（包含解题思路和知识点说明）",
-      "points": 10
-    },
-    {
-      "id": 2,
-      "question": "题目内容（要求有明确的解题步骤）",
-      "type": "short_answer",
-      "correctAnswer": "标准答案（包含关键步骤）",
-      "explanation": "详细解析（包含解题方法和注意事项）",
-      "points": 8
-    },
-    {
-      "id": 3,
-      "question": "题目内容（要求具有综合性和开放性）",
-      "type": "essay",
-      "correctAnswer": "参考答案要点（列出主要得分点）",
-      "explanation": "评分标准（明确各部分分值分配）",
-      "points": 15
-    }
-  ]
-}
-
-## ⚠️ 重要提醒
-- 必须严格按照JSON格式输出，不要添加任何其他文字
-- 确保所有题目都基于提供的学习内容
-- 题目难度要符合${grade || '中学'}学生的认知水平
-- 每道题目都要有详细的解析和评分标准`
+              content: `你是一位资深的 ${grade || '中学'} ${subject || '全学科'} 教师和考试专家，具有丰富的命题与阅卷经验，熟悉 ${region || '全国通用'} 地区的考试风格、教材体系与课程标准。  
+ 请根据提供的学习内容、实时考纲和知识库要求，生成 10 道高质量考试题。  
+ 
+ ## 🎯 命题原则 
+ 1. **科学性**：题目内容必须准确无误，符合学科规律与教材标准。  
+ 2. **针对性**：紧扣学习内容与考纲要求，精准考查核心知识点。  
+ 3. **层次性**：难度递进，覆盖不同认知层次（理解→分析→综合）。  
+ 4. **实用性**：贴近实际考试，符合当前命题趋势。  
+ 5. **创新性**：题型设计新颖，体现新课标导向与学科核心素养。  
+ 
+ ## 📋 题目要求 
+ **题型分布：** 
+ - 2～4 道选择题：考查概念理解与判断能力。  
+ - 1～3 道填空题：考查关键知识、核心公式、表达或计算。  
+ - 其余为综合分析 / 论述题：考查综合运用与创新思维能力。  
+ 
+ **质量标准：** 
+ - **选择题**：选项设计合理、干扰项具迷惑性但不偏离考点。  
+ - **填空题**：设有明确标准答案，考查推理、记忆与应用能力。  
+ - **综合题 / 论述题**：有清晰思路、评分要点明确，既考察知识又考察表达。  
+ - 所有题目表达清晰，逻辑严谨，无歧义或超纲内容。  
+ 
+ **难度比例：** 
+ - 基础题（30%）→ 直接考查概念与基础技能  
+ - 中等题（50%）→ 分析性题目，需推理或计算  
+ - 提高题（20%）→ 综合性强，考查应用与创新  
+ 
+ **地区特色：** 
+ - 结合 ${region || '通用'} 地区考试特点与命题风格  
+ - 参考当地教材版本和考试要求（如人教版 / 北师大版 / 牛津版等）  
+ 
+ --- 
+ 
+ 请严格按照以下 JSON 格式输出（格式必须完全正确）： 
+ 
+ { 
+   "questions": [ 
+     { 
+       "id": 1, 
+       "subject": "物理", 
+       "question": "题目内容（表述清晰、考点准确）", 
+       "type": "multiple_choice", 
+       "options": ["A. 选项1", "B. 选项2", "C. 选项3", "D. 选项4"], 
+       "correctAnswer": "C. 正确选项", 
+       "explanation": "详细解析：说明考点、原理、解题思路及易错点。", 
+       "points": 5, 
+       "difficulty": "基础" 
+     }, 
+     { 
+       "id": 2, 
+       "subject": "数学", 
+       "question": "题目内容（计算或分析题）", 
+       "type": "fill_in_blank", 
+       "correctAnswer": "标准答案（含关键计算或表达步骤）", 
+       "explanation": "详细解析：列出解题思路、使用公式、关键逻辑与注意事项。", 
+       "points": 8, 
+       "difficulty": "中等" 
+     }, 
+     { 
+       "id": 3, 
+       "subject": "语文", 
+       "question": "题目内容（论述或综合性任务）", 
+       "type": "essay", 
+       "correctAnswer": "参考答案要点（列出主要得分点与逻辑层次）", 
+       "explanation": "评分标准：说明各部分得分依据、表达要求与能力层级。", 
+       "points": 15, 
+       "difficulty": "提高" 
+     } 
+   ] 
+ } 
+ 
+ --- 
+ 
+ ## ⚠️ 重要提醒 
+ 1. 严格输出 **JSON 格式**，不要添加任何额外文字、符号或解释。  
+ 2. 每题必须包括：题型、学科、题干、正确答案、详细解析、分值与难度。  
+ 3. 题目内容必须基于**当前考纲与教材**，且**符合实际考试逻辑**。  
+ 4. 所有题目语言规范、逻辑严密、数据合理，不能出现模糊或超纲表述。  
+ 5. 保证题型多样、覆盖全面、层次分布合理，能直接用于AI学习系统的讲解、测评与复盘模块。`
             },
             {
               role: 'user',
@@ -181,6 +194,11 @@ ${content}
        const q: any = questions[i]
        if (!q.id || !q.question || !q.type || !q.points) {
          throw new Error(`第${i+1}道题目格式错误：缺少必要字段\n题目数据: ${JSON.stringify(q)}`)
+       }
+       
+       // 将fill_in_blank类型转换为short_answer类型
+       if (q.type === 'fill_in_blank') {
+         q.type = 'short_answer'
        }
        
        if (!['multiple_choice', 'short_answer', 'essay'].includes(q.type)) {
@@ -383,6 +401,18 @@ export default function QuizStep({ knowledgeContent, region, grade, subject, top
 
   const currentQuestion = questions[currentQuestionIndex]
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100
+
+  // 如果没有当前题目，显示加载状态
+  if (!currentQuestion) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-blue-600 font-medium">正在加载题目...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 relative">

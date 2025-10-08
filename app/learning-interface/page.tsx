@@ -47,6 +47,8 @@ function LearningInterfaceContent() {
   const [stepData, setStepData] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [quizResults, setQuizResults] = useState<any>(null);
+  const [aiSummary, setAiSummary] = useState(''); // AI学习总结
+  const [showSummaryModal, setShowSummaryModal] = useState(false); // 控制总结弹窗显示
   
   // 苏格拉底对话状态
   const [socraticDialogue, setSocraticDialogue] = useState<Array<{
@@ -101,6 +103,14 @@ function LearningInterfaceContent() {
                 // 恢复苏格拉底对话
                 if (learningProgress.socraticDialogue) {
                   setSocraticDialogue(learningProgress.socraticDialogue);
+                }
+                
+                // 恢复AI总结
+                if (learningProgress.aiSummary) {
+                  console.log('恢复AI总结:', learningProgress.aiSummary);
+                  setAiSummary(learningProgress.aiSummary);
+                } else {
+                  console.log('学习进度中没有AI总结');
                 }
                 
                 setIsLoading(false);
@@ -533,7 +543,8 @@ function LearningInterfaceContent() {
          topic,
          aiExplanation,
          socraticDialogue,
-         currentStep
+         currentStep,
+         aiSummary // 包含AI总结
        });
        
        setHasManualSave(true);
@@ -648,6 +659,26 @@ function LearningInterfaceContent() {
                   </>
                 )}
               </button>
+
+              {/* 调试信息 */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="text-xs text-gray-500 bg-gray-100 p-2 rounded">
+                  aiSummary状态: {aiSummary ? `有内容(${aiSummary.length}字符)` : '无内容'}
+                </div>
+              )}
+
+              {/* 学习总结按钮 */}
+              {aiSummary && (
+                <button
+                  onClick={() => setShowSummaryModal(true)}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-400 to-indigo-400 text-white rounded-lg hover:from-purple-500 hover:to-indigo-500 transition-all duration-200 flex items-center space-x-2 shadow-md border border-purple-300"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>上一次课程总结</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -768,11 +799,77 @@ function LearningInterfaceContent() {
                 understandingLevel={80}
                 onContinue={handleReviewComplete}
                 onRestart={() => setCurrentStep('EXPLAIN')}
+                session={{
+                  topic: topic || '',
+                  subject: subject || '',
+                  createdAt: new Date(),
+                  steps: []
+                }}
+                quizQuestions={quizResults?.questions || []}
+                learningDuration={Math.floor((Date.now() - (lastSaveTime || Date.now())) / 60000) || 25}
+                onAiSummaryGenerated={(summary) => setAiSummary(summary)}
+                conversationId={conversationId || undefined}
               />
             )}
           </div>
         </div>
       </div>
+
+      {/* 学习总结弹窗 */}
+      {showSummaryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+            {/* 弹窗头部 */}
+            <div className="bg-gradient-to-r from-purple-500 to-indigo-500 text-white p-6 flex justify-between items-center">
+              <div className="flex items-center space-x-3">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h2 className="text-2xl font-bold">上一次课程总结</h2>
+              </div>
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="text-white hover:text-gray-200 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* 弹窗内容 */}
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {aiSummary ? (
+                <div className="prose prose-lg max-w-none">
+                  <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-6 border border-purple-200">
+                    <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
+                      {aiSummary}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-gray-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-gray-500 text-lg">暂无课程总结</p>
+                  <p className="text-gray-400 text-sm mt-2">完成学习流程后将自动生成课程总结</p>
+                </div>
+              )}
+            </div>
+
+            {/* 弹窗底部 */}
+            <div className="bg-gray-50 px-6 py-4 flex justify-end">
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="px-6 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all duration-200 shadow-md"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 底部装饰线 */}
       <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-400 to-transparent"></div>

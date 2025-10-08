@@ -68,35 +68,61 @@ export default function ReAskModal({ isOpen, onClose, subject, topic, originalCo
 
   // 混合渲染函数：使用TableRenderer处理表格，ReactMarkdown处理其他内容
   const renderContentWithTables = (content: string, components: any) => {
-    const tableData = parseMarkdownTable(content);
+    // 检查内容是否包含表格
+    const hasTable = parseMarkdownTable(content) !== null;
     
-    if (tableData) {
-      // 如果内容包含表格，分割内容并分别渲染
-      const beforeTable = content.substring(0, content.indexOf('|'));
-      const afterTableMatch = content.match(/\n\n([\s\S]*)$/);
-      const afterTable = afterTableMatch ? afterTableMatch[1] : '';
+    if (hasTable) {
+      // 如果包含表格，使用改进的分割逻辑
+      const tableRegex = /^\s*\|(.+)\|\s*\n\s*\|[-\s|:]+\|\s*\n((?:\s*\|.+\|\s*\n?)*)/gm;
+      let lastIndex = 0;
+      const parts = [];
+      let match;
+      
+      // 重置正则表达式的lastIndex
+      tableRegex.lastIndex = 0;
+      
+      while ((match = tableRegex.exec(content)) !== null) {
+        // 添加表格前的内容
+        if (match.index > lastIndex) {
+          const beforeTable = content.substring(lastIndex, match.index).trim();
+          if (beforeTable) {
+            parts.push({ type: 'markdown', content: beforeTable });
+          }
+        }
+        
+        // 添加表格内容
+        parts.push({ type: 'table', content: match[0] });
+        
+        lastIndex = match.index + match[0].length;
+      }
+      
+      // 添加最后一个表格后的内容
+      if (lastIndex < content.length) {
+        const afterTable = content.substring(lastIndex).trim();
+        if (afterTable) {
+          parts.push({ type: 'markdown', content: afterTable });
+        }
+      }
       
       return (
         <>
-          {beforeTable.trim() && (
-            <ReactMarkdown
-              remarkPlugins={[remarkMath]}
-              rehypePlugins={[rehypeKatex]}
-              components={components}
-            >
-              {beforeTable.trim()}
-            </ReactMarkdown>
-          )}
-          <TableRenderer content={content} />
-          {afterTable.trim() && (
-            <ReactMarkdown
-              remarkPlugins={[remarkMath]}
-              rehypePlugins={[rehypeKatex]}
-              components={components}
-            >
-              {afterTable.trim()}
-            </ReactMarkdown>
-          )}
+          {parts.map((part, index) => {
+            if (part.type === 'table') {
+              return <TableRenderer key={index} content={part.content} />;
+            } else {
+              // 非表格内容使用ReactMarkdown渲染
+              return (
+                <ReactMarkdown
+                  key={index}
+                  remarkPlugins={[remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
+                  components={components}
+                >
+                  {part.content}
+                </ReactMarkdown>
+              );
+            }
+          })}
         </>
       );
     } else {

@@ -16,6 +16,7 @@ export interface LearningProgressData {
   finalScore?: number;
   feedback?: string;
   reviewNotes?: string;
+  aiSummary?: string; // AI生成的课程总结
 }
 
 export interface QuizQuestionData {
@@ -62,6 +63,7 @@ export class LearningProgressService {
             finalScore: data.finalScore ?? existingSession.finalScore,
             feedback: data.feedback || existingSession.feedback,
             reviewNotes: data.reviewNotes || existingSession.reviewNotes,
+            aiSummary: data.aiSummary || existingSession.aiSummary,
             updatedAt: new Date()
           }
         });
@@ -81,7 +83,8 @@ export class LearningProgressService {
             isCompleted: data.isCompleted || false,
             finalScore: data.finalScore,
             feedback: data.feedback,
-            reviewNotes: data.reviewNotes
+            reviewNotes: data.reviewNotes,
+            aiSummary: data.aiSummary
           }
         });
       }

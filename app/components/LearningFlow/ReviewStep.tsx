@@ -20,9 +20,12 @@ interface ReviewStepProps {
     subject: string;
     createdAt: Date;
     steps: any[];
+    conversationId?: string;
   };
   quizQuestions?: any[];
   learningDuration?: number; // 学习时长（分钟）
+  onAiSummaryGenerated?: (summary: string) => void; // 课程总结生成回调
+  conversationId?: string; // 对话ID，用于保存课程总结
 }
 
 const ReviewStep: React.FC<ReviewStepProps> = ({ 
@@ -34,14 +37,24 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
   onRestart,
   session,
   quizQuestions = [],
-  learningDuration = 0
+  learningDuration = 0,
+  onAiSummaryGenerated,
+  conversationId
 }) => {
   const [hasReviewed, setHasReviewed] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [aiSummary, setAiSummary] = useState<string>('');
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [hasAttemptedAiGeneration, setHasAttemptedAiGeneration] = useState(false);
   const [learningRecommendations, setLearningRecommendations] = useState<string[]>([]);
+  const [apiConnectionStatus, setApiConnectionStatus] = useState<'unknown' | 'connected' | 'error'>('unknown');
+  const [connectionError, setConnectionError] = useState('');
   const summaryRef = useRef<HTMLDivElement>(null);
+
+  // 新增：真实学习成果数据状态
+  const [realLearningResults, setRealLearningResults] = useState<any>(null);
+  const [isLoadingResults, setIsLoadingResults] = useState(false);
+  const [useRealData, setUseRealData] = useState(true); // 控制是否使用真实数据
 
   // 混合渲染函数：检测表格并选择合适的渲染方式
   const renderContentWithTables = (content: string, customComponents: any) => {
@@ -49,17 +62,44 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
     const hasTable = parseMarkdownTable(content) !== null;
     
     if (hasTable) {
-      // 如果包含表格，使用TableRenderer处理表格，ReactMarkdown处理其他内容
-      const tableRegex = /(\|.+\|\n\|[-\s|:]+\|\n(?:\|.+\|\n?)*)/g;
-      const parts = content.split(tableRegex);
+      // 如果包含表格，使用改进的分割逻辑
+      const tableRegex = /^\s*\|(.+)\|\s*\n\s*\|[-\s|:]+\|\s*\n((?:\s*\|.+\|\s*\n?)*)/gm;
+      let lastIndex = 0;
+      const parts = [];
+      let match;
+      
+      // 重置正则表达式的lastIndex
+      tableRegex.lastIndex = 0;
+      
+      while ((match = tableRegex.exec(content)) !== null) {
+        // 添加表格前的内容
+        if (match.index > lastIndex) {
+          const beforeTable = content.substring(lastIndex, match.index).trim();
+          if (beforeTable) {
+            parts.push({ type: 'markdown', content: beforeTable });
+          }
+        }
+        
+        // 添加表格内容
+        parts.push({ type: 'table', content: match[0] });
+        
+        lastIndex = match.index + match[0].length;
+      }
+      
+      // 添加最后一个表格后的内容
+      if (lastIndex < content.length) {
+        const afterTable = content.substring(lastIndex).trim();
+        if (afterTable) {
+          parts.push({ type: 'markdown', content: afterTable });
+        }
+      }
       
       return (
         <div>
           {parts.map((part, index) => {
-            // 检查这部分是否是表格
-            if (parseMarkdownTable(part)) {
-              return <TableRenderer key={index} content={part} />;
-            } else if (part.trim()) {
+            if (part.type === 'table') {
+              return <TableRenderer key={index} content={part.content} />;
+            } else {
               // 非表格内容使用ReactMarkdown渲染
               return (
                 <ReactMarkdown
@@ -68,11 +108,10 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
                   rehypePlugins={[rehypeKatex]}
                   components={customComponents}
                 >
-                  {part}
+                  {part.content}
                 </ReactMarkdown>
               );
             }
-            return null;
           })}
         </div>
       );
@@ -90,12 +129,255 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
     }
   };
 
-  // 生成AI学习总结
+  // 增强的测验分析功能
+  const enhancedQuizAnalysis = () => {
+    const correctAnswers = score;
+    const wrongAnswers = totalQuestions - score;
+    const accuracy = Math.round((score / totalQuestions) * 100);
+    
+    // 学习效率分析
+    const efficiencyScore = learningDuration > 0 ? Math.round(accuracy / learningDuration * 10) : 0;
+    const getEfficiencyLevel = (score: number) => {
+      if (score > 8) return '高效';
+      if (score > 5) return '中等';
+      return '待提升';
+    };
+    
+    const getEfficiencyAdvice = (score: number) => {
+      if (score > 8) return '学习效率很高，继续保持';
+      if (score > 5) return '学习效率中等，可以尝试优化学习方法';
+      return '建议调整学习策略，提高学习效率';
+    };
+    
+    // 错误类型分析
+    const errorTypes: { [key: string]: number } = {};
+    const knowledgePointErrors: { [key: string]: number } = {};
+    
+    quizQuestions.forEach((q: any) => {
+      if (q.userAnswer !== q.correctAnswer) {
+        // 基于题目内容和学科分析错误类型
+        const subject = session?.subject || '';
+        const questionText = q.question || '';
+        
+        let errorType = '概念理解错误';
+        let knowledgePoint = '基础概念';
+        
+        if (subject.includes('物理') || subject.includes('Physics')) {
+          if (questionText.includes('透镜') || questionText.includes('成像')) {
+            errorType = '光学原理错误';
+            knowledgePoint = '透镜成像';
+          } else if (questionText.includes('力') || questionText.includes('运动')) {
+            errorType = '力学概念错误';
+            knowledgePoint = '力学基础';
+          } else if (questionText.includes('电') || questionText.includes('磁')) {
+            errorType = '电磁学错误';
+            knowledgePoint = '电磁学';
+          }
+        } else if (subject.includes('数学') || subject.includes('Math')) {
+          if (questionText.includes('函数') || questionText.includes('方程')) {
+            errorType = '函数理解错误';
+            knowledgePoint = '函数与方程';
+          } else if (questionText.includes('几何') || questionText.includes('图形')) {
+            errorType = '几何概念错误';
+            knowledgePoint = '几何图形';
+          }
+        } else if (subject.includes('化学') || subject.includes('Chemistry')) {
+          if (questionText.includes('反应') || questionText.includes('化合')) {
+            errorType = '化学反应错误';
+            knowledgePoint = '化学反应';
+          } else if (questionText.includes('元素') || questionText.includes('周期')) {
+            errorType = '元素周期错误';
+            knowledgePoint = '元素周期表';
+          }
+        }
+        
+        errorTypes[errorType] = (errorTypes[errorType] || 0) + 1;
+        knowledgePointErrors[knowledgePoint] = (knowledgePointErrors[knowledgePoint] || 0) + 1;
+      }
+    });
+    
+    return {
+      totalQuestions,
+      correctAnswers,
+      wrongAnswers,
+      accuracy,
+      efficiencyLevel: getEfficiencyLevel(efficiencyScore),
+      efficiencyAdvice: getEfficiencyAdvice(efficiencyScore),
+      learningDuration,
+      errorTypes,
+      knowledgePointErrors,
+      advice: accuracy >= 80 ? '表现优秀，继续保持！' : accuracy >= 60 ? '基础良好，需要加强练习' : '需要重点复习基础知识'
+    };
+  };
+
+  // 分析知识点缺陷
+  const analyzeKnowledgeGaps = () => {
+    const gaps: any[] = [];
+    
+    quizQuestions.forEach((question: any, index: number) => {
+      if (question.userAnswer !== question.correctAnswer) {
+        const subject = session?.subject || '';
+        const questionText = question.question || '';
+        
+        let knowledgePoint = '基础概念';
+        let formula = '';
+        let concept = '';
+        let errorType = '概念理解错误';
+        let suggestion = '建议重新学习相关概念';
+        
+        // 根据学科和题目内容分析具体知识点
+        if (subject.includes('物理') || subject.includes('Physics')) {
+          if (questionText.includes('透镜') || questionText.includes('成像')) {
+            knowledgePoint = '透镜成像原理';
+            formula = '1/f = 1/u + 1/v (透镜成像公式)';
+            concept = '凸透镜和凹透镜的成像规律';
+            errorType = '光学公式应用错误';
+            suggestion = '重点复习透镜成像公式的推导和应用，多做相关练习题';
+          } else if (questionText.includes('力') || questionText.includes('运动')) {
+            knowledgePoint = '牛顿运动定律';
+            formula = 'F = ma (牛顿第二定律)';
+            concept = '力与加速度的关系';
+            errorType = '力学概念理解错误';
+            suggestion = '加强对牛顿三大定律的理解，注意力的方向和大小';
+          }
+        } else if (subject.includes('数学') || subject.includes('Math')) {
+          if (questionText.includes('函数') || questionText.includes('方程')) {
+            knowledgePoint = '一次函数';
+            formula = 'y = kx + b';
+            concept = '函数的图像和性质';
+            errorType = '函数概念理解错误';
+            suggestion = '重点掌握函数的定义域、值域和图像特征';
+          } else if (questionText.includes('几何')) {
+            knowledgePoint = '几何图形性质';
+            formula = '根据具体图形而定';
+            concept = '图形的面积、周长等基本性质';
+            errorType = '几何概念错误';
+            suggestion = '加强几何图形的识别和性质记忆';
+          }
+        } else if (subject.includes('化学') || subject.includes('Chemistry')) {
+          if (questionText.includes('反应')) {
+            knowledgePoint = '化学反应原理';
+            formula = '反应方程式配平';
+            concept = '化学反应的条件和产物';
+            errorType = '化学反应理解错误';
+            suggestion = '重点掌握常见化学反应的条件和产物';
+          }
+        }
+        
+        gaps.push({
+          questionIndex: index + 1,
+          knowledgePoint,
+          formula,
+          concept,
+          errorType,
+          suggestion
+        });
+      }
+    });
+    
+    return gaps;
+  };
+
+  // 今日学习内容结构化概括
+  const generateDailyContentSummary = () => {
+    const contentLength = content.length;
+    const wordCount = content.split(/\s+/).length;
+    
+    // 提取关键概念（简单的关键词提取）
+    const keyConcepts: string[] = [];
+    const conceptPatterns = [
+      /([A-Z][a-z]+定律|定理|公式)/g,
+      /(透镜|成像|光学|力学|电学|化学|数学|函数|方程|几何)/g,
+      /([一-龟]+定律|定理|公式)/g
+    ];
+    
+    conceptPatterns.forEach(pattern => {
+      const matches = content.match(pattern);
+      if (matches) {
+        keyConcepts.push(...matches);
+      }
+    });
+    
+    // 去重并限制数量
+    const uniqueConcepts = Array.from(new Set(keyConcepts)).slice(0, 8);
+    
+    // 分析学习内容的结构
+    const sections = content.split(/\n\s*\n/).filter(section => section.trim().length > 50);
+    const sectionCount = sections.length;
+    
+    // 识别重点和难点（基于内容特征）
+    const keyPoints: string[] = [];
+    const difficulties: string[] = [];
+    
+    sections.forEach((section, index) => {
+      const sectionText = section.trim();
+      if (sectionText.includes('重要') || sectionText.includes('关键') || sectionText.includes('核心')) {
+        keyPoints.push(`第${index + 1}部分: ${sectionText.substring(0, 50)}...`);
+      }
+      if (sectionText.includes('难') || sectionText.includes('复杂') || sectionText.includes('注意')) {
+        difficulties.push(`第${index + 1}部分: ${sectionText.substring(0, 50)}...`);
+      }
+    });
+    
+    // 学习收获评估
+    const learningOutcomes: string[] = [];
+    if (uniqueConcepts.length > 0) {
+      learningOutcomes.push(`掌握了${uniqueConcepts.length}个核心概念`);
+    }
+    if (quizQuestions.length > 0) {
+      const correctRate = Math.round((score / totalQuestions) * 100);
+      learningOutcomes.push(`完成${quizQuestions.length}道练习题，正确率${correctRate}%`);
+    }
+    if (learningDuration > 0) {
+      learningOutcomes.push(`投入${learningDuration}分钟学习时间`);
+    }
+    
+    return {
+      contentLength,
+      wordCount,
+      keyConcepts: uniqueConcepts,
+      sectionCount,
+      keyPoints: keyPoints.slice(0, 3),
+      difficulties: difficulties.slice(0, 3),
+      learningOutcomes,
+      topic: session?.topic || '未知主题',
+      subject: session?.subject || '未知学科'
+    };
+  };
+
+  // 检查API连接状态
+  const checkApiConnection = async () => {
+    try {
+      const response = await fetch('/api/test-connection');
+      const data = await response.json();
+      
+      if (data.success) {
+        setApiConnectionStatus('connected');
+        setConnectionError('');
+      } else {
+        setApiConnectionStatus('error');
+        setConnectionError(data.error || 'API连接失败');
+      }
+    } catch (error) {
+      setApiConnectionStatus('error');
+      setConnectionError('无法连接到API服务');
+    }
+  };
+
+  // 生成课程总结
   const generateAISummary = async () => {
-    if (!session || isGeneratingSummary || aiSummary) return;
+    if (!session || isGeneratingSummary || hasAttemptedAiGeneration) {
+      return;
+    }
     
     setIsGeneratingSummary(true);
+    setHasAttemptedAiGeneration(true);
     try {
+      // 分析知识点缺陷
+      const knowledgeGaps = analyzeKnowledgeGaps();
+      // 增强的测验分析
+      const quizAnalysis = enhancedQuizAnalysis();
+      const dailyContentSummary = generateDailyContentSummary();
       const response = await fetch('/api/openai-chat', {
         method: 'POST',
         headers: {
@@ -105,29 +387,47 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
           messages: [
             {
               role: 'system',
-              content: `你是一个专业的学习分析师和教育专家。请根据学生的学习情况生成深度的、个性化的学习总结和分析。
+              content: `你是一个专业的学习分析师和教育专家。请根据学生的测验成绩和理解程度，生成个性化的课程总结。
 
-## 📋 分析目标
-为学生提供有价值的学习反馈，帮助他们了解自己的学习状况，发现优势和不足，并获得改进建议。
+## 📋 总结要求
+请根据学生的具体表现，按以下结构生成课程总结：
 
-## 📊 可以关注的方面
-你可以从以下角度进行分析，但不必拘泥于固定格式：
-- 知识掌握情况和理解深度
-- 学习表现和能力评估
-- 错误模式和改进方向
-- 学习效率和时间管理
-- 个性化建议和后续规划
+### 1. 📊 学习表现分析
+- **测验成绩评价**：根据得分率给出客观评价
+  - 90%以上：优秀，知识掌握扎实
+  - 80-89%：良好，大部分知识点掌握
+  - 70-79%：中等，基础知识基本掌握
+  - 60-69%：及格，需要加强练习
+  - 60%以下：需要重点复习
+- **理解程度分析**：结合理解程度星级进行分析
+- **学习效率评估**：根据学习时长和成绩评估效率
+
+### 2. 📚 知识点掌握情况
+- **已掌握知识点**：列出学生答对的题目涉及的知识点
+- **薄弱知识点**：重点分析错题背后的知识点
+- **知识点关联**：说明各知识点之间的联系
+- **巩固建议**：针对薄弱环节提供具体的学习建议
+
+### 3. 🎯 个性化学习建议
+- **基于成绩的建议**：
+  - 高分学生：拓展深度，挑战更难题目
+  - 中等学生：巩固基础，查漏补缺
+  - 低分学生：回归基础，重点突破
+- **基于理解程度的建议**：
+  - 理解程度高：可以尝试应用题和综合题
+  - 理解程度中等：多做练习，加深理解
+  - 理解程度低：重新学习基础概念
+- **学习方法建议**：提供具体可行的学习策略
 
 ## 📝 写作要求
-- 使用专业但易懂的语言
-- 提供具体的数据支撑
-- 包含鼓励性的正面反馈
-- 给出明确的行动建议
-- 用自然的方式组织内容，避免固定模板`
+- 根据实际数据进行分析，避免泛泛而谈
+- 语言鼓励但客观，指出问题但给出解决方案
+- 提供具体可操作的建议
+- 结构清晰，重点突出`
             },
             {
               role: 'user',
-              content: `请为以下学习情况生成深度个性化分析：
+              content: `请为以下学习情况生成个性化课程总结：
 
 ## 📚 学习基本信息
 - **学习主题**: ${session.topic}
@@ -135,28 +435,25 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
 - **学习时长**: ${learningDuration}分钟
 - **完成时间**: ${new Date().toLocaleDateString()}
 
-## 📊 学习成果数据
+## 📊 测验成绩详情
 - **测验得分**: ${score}/${totalQuestions}题正确
-- **得分率**: ${Math.round((score/totalQuestions)*100)}%
+- **得分率**: ${totalQuestions > 0 ? Math.round((score / totalQuestions) * 100) : 0}%
 - **理解程度**: ${getUnderstandingText(understandingLevel)} (${understandingLevel}/5星)
-- **学习效率**: ${learningDuration > 0 ? Math.round((score/totalQuestions)*100/learningDuration*10) : 0}分/题
+- **错题数量**: ${totalQuestions - score}题
+
+## 📝 具体测验题目分析
+${quizQuestions.map((q, index) => `
+**第${index + 1}题**: ${q.question}
+- 学生答案: ${q.userAnswer || '未作答'}
+- 正确答案: ${q.correctAnswer}
+- 结果: ${q.isCorrect ? '✅ 正确' : '❌ 错误'}
+${q.explanation ? `- 解析: ${q.explanation}` : ''}
+`).join('\n')}
 
 ## 📖 学习内容概要
 ${content.substring(0, 800)}...
 
-## 🎯 测验详细表现
-${quizQuestions.map((q: any, index: number) => {
-  const isCorrect = q.userAnswer === q.correctAnswer;
-  return `**题目${index + 1}** [${isCorrect ? '✅正确' : '❌错误'}]: ${q.question.substring(0, 80)}...
-  - 学生答案: ${q.userAnswer || '未作答'}
-  - 正确答案: ${q.correctAnswer}
-  ${!isCorrect ? `- 错误分析: ${q.errorType || '需要进一步分析'}` : ''}`;
-}).join('\n\n')}
-
-## 🎯 分析要求
-请生成一份深度学习分析报告，用自然灵活的方式分析学生的学习情况，提供有价值的反馈和建议。
-
-请确保分析具有**专业性、针对性和实用性**，但不必拘泥于固定的格式结构。`
+请根据以上具体的测验表现和理解程度，生成针对性的课程总结和学习建议。`
             }
           ]
         })
@@ -164,15 +461,80 @@ ${quizQuestions.map((q: any, index: number) => {
 
       if (response.ok) {
         const data = await response.json();
-        setAiSummary(data.content || '');
+        const generatedSummary = data.content || '';
+        setAiSummary(generatedSummary);
+        
+        // 通知父组件AI总结已生成
+        if (onAiSummaryGenerated) {
+          onAiSummaryGenerated(generatedSummary);
+        }
+        
+        // 保存AI总结到数据库
+        if (session && generatedSummary && conversationId) {
+          try {
+            const saveResponse = await fetch('/api/learning-progress', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                conversationId: conversationId, // 使用传入的conversationId
+                subject: session.subject,
+                topic: session.topic,
+                aiSummary: generatedSummary,
+                currentStep: 'REVIEW',
+                isCompleted: true
+              }),
+            });
+            
+            if (saveResponse.ok) {
+              console.log('AI总结已保存到数据库');
+            } else {
+              console.error('保存AI总结到数据库失败');
+            }
+          } catch (saveError) {
+            console.error('保存AI总结时发生错误:', saveError);
+          }
+        }
       } else {
         throw new Error('AI总结生成失败');
       }
     } catch (error) {
-      console.error('生成AI总结失败:', error);
+      console.error('生成课程总结失败:', error);
       // 使用增强的智能总结作为备选
       const enhancedSummary = generateEnhancedIntelligentSummary();
       setAiSummary(enhancedSummary);
+      
+      // 通知父组件备选总结已生成
+      if (onAiSummaryGenerated) {
+        onAiSummaryGenerated(enhancedSummary);
+      }
+      
+      // 也尝试保存备选总结到数据库
+      if (session && enhancedSummary && conversationId) {
+        try {
+          const saveResponse = await fetch('/api/learning-progress', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              conversationId: conversationId,
+              subject: session.subject,
+              topic: session.topic,
+              aiSummary: enhancedSummary,
+              currentStep: 'REVIEW',
+              isCompleted: true
+            }),
+          });
+          
+          if (saveResponse.ok) {
+            console.log('备选AI总结已保存到数据库');
+          }
+        } catch (saveError) {
+          console.error('保存备选AI总结时发生错误:', saveError);
+        }
+      }
     } finally {
       setIsGeneratingSummary(false);
     }
@@ -369,11 +731,44 @@ ${scorePercentage >= 80 ?
 *📊 本报告基于您的学习数据生成，建议定期进行学习评估以跟踪进步情况。*`;
   };
 
-  // 组件加载时生成AI总结和建议
+  // 获取真实学习成果数据
+  const fetchRealLearningResults = async () => {
+    if (!session?.conversationId) return;
+    
+    try {
+      setIsLoadingResults(true);
+      const response = await fetch(`/api/learning-results?conversationId=${session.conversationId}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setRealLearningResults(data);
+        console.log('获取到真实学习成果数据:', data);
+      } else {
+        console.warn('无法获取真实学习成果数据，使用传入的props数据');
+        setUseRealData(false);
+      }
+    } catch (error) {
+      console.error('获取真实学习成果数据失败:', error);
+      setUseRealData(false);
+    } finally {
+      setIsLoadingResults(false);
+    }
+  };
+
+  // 组件加载时生成课程总结和建议
   useEffect(() => {
+    // 重置AI生成标志，允许为新的session生成课程总结
+    setHasAttemptedAiGeneration(false);
+    setAiSummary('');
+    
+    // 获取真实学习成果数据
+    fetchRealLearningResults();
+    
     generateAISummary();
     const recommendations = generateLearningRecommendations();
     setLearningRecommendations(recommendations);
+    // 检查API连接状态
+    checkApiConnection();
   }, [session, score, totalQuestions, understandingLevel]);
 
   const handleContinue = () => {
@@ -520,44 +915,169 @@ ${scorePercentage >= 80 ?
             {/* 测验成绩 */}
             <div className="bg-gray-700 rounded p-4 border border-gray-600">
               <div className="text-white mb-1">测验成绩</div>
-              <div className="text-2xl font-bold text-yellow-400">
-                {score}/{totalQuestions}
-              </div>
-              <div className="text-white">
-                {Math.round((score / totalQuestions) * 100)}%
-              </div>
+              {isLoadingResults ? (
+                <div className="flex items-center space-x-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-400"></div>
+                  <span className="text-gray-300">加载中...</span>
+                </div>
+              ) : useRealData && realLearningResults ? (
+                <div>
+                  <div className="text-2xl font-bold text-yellow-400">
+                    {realLearningResults.quizScore.correct}/{realLearningResults.quizScore.total}
+                  </div>
+                  <div className="text-white">
+                    {realLearningResults.quizScore.percentage}%
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="text-2xl font-bold text-yellow-400">
+                    {score}/{totalQuestions}
+                  </div>
+                  <div className="text-white">
+                    {totalQuestions > 0 ? Math.round((score / totalQuestions) * 100) : 0}%
+                  </div>
+                </div>
+              )}
             </div>
             
             {/* 理解程度 */}
             <div className="bg-gray-700 rounded p-4 border border-gray-600">
               <div className="text-white mb-1">理解程度</div>
-              <div className="flex items-center">
-                <div className="flex space-x-1 mr-2">
-                  {[1, 2, 3, 4, 5].map((level) => (
-                    <div
-                      key={level}
-                      className={`h-5 w-5 rounded-full ${level <= understandingLevel ? 'bg-yellow-400' : 'bg-gray-600'}`}
-                    ></div>
-                  ))}
+              {isLoadingResults ? (
+                <div className="flex items-center space-x-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-400"></div>
+                  <span className="text-gray-300">加载中...</span>
                 </div>
-                <span className="font-bold text-white">
-                  {understandingLevel}/5 - {getUnderstandingText(understandingLevel)}
-                </span>
-              </div>
+              ) : useRealData && realLearningResults ? (
+                <div className="flex items-center">
+                  <div className="flex space-x-1 mr-2">
+                    {[1, 2, 3, 4, 5].map((level) => (
+                      <div
+                        key={level}
+                        className={`h-5 w-5 rounded-full ${level <= realLearningResults.understandingLevel ? 'bg-yellow-400' : 'bg-gray-600'}`}
+                      ></div>
+                    ))}
+                  </div>
+                  <span className="font-bold text-white">
+                    {realLearningResults.understandingLevel}/5 - {getUnderstandingText(realLearningResults.understandingLevel)}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center">
+                  <div className="flex space-x-1 mr-2">
+                    {[1, 2, 3, 4, 5].map((level) => (
+                      <div
+                        key={level}
+                        className={`h-5 w-5 rounded-full ${level <= understandingLevel ? 'bg-yellow-400' : 'bg-gray-600'}`}
+                      ></div>
+                    ))}
+                  </div>
+                  <span className="font-bold text-white">
+                    {understandingLevel}/5 - {getUnderstandingText(understandingLevel)}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* AI学习总结 */}
+          {/* 详细学习成果 (仅在有真实数据时显示) */}
+          {useRealData && realLearningResults && (
+            <div className="mb-6">
+              <h4 className="font-bold text-yellow-400 mb-3 text-lg flex items-center gap-2">
+                <span>📊</span>
+                详细学习成果
+              </h4>
+              
+              <div className="bg-gray-700 rounded p-4 border border-gray-600 space-y-4">
+                {/* 学习时长 */}
+                <div>
+                  <div className="text-white font-medium mb-2">学习时长</div>
+                  <div className="text-blue-400 text-lg">{realLearningResults.learningDuration} 分钟</div>
+                </div>
+                
+                {/* 错误分析 */}
+                {realLearningResults.errorAnalysis && realLearningResults.errorAnalysis.length > 0 && (
+                  <div>
+                    <div className="text-white font-medium mb-2">错误分析</div>
+                    <div className="space-y-2">
+                      {realLearningResults.errorAnalysis.map((error: any, index: number) => (
+                       <div key={index} className="bg-gray-800 p-3 rounded border border-gray-600">
+                         <div className="text-red-400 font-medium">{error.type}</div>
+                         <div className="text-gray-300 text-sm mt-1">{error.description}</div>
+                       </div>
+                     ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* 学习建议 */}
+                {realLearningResults.suggestions && realLearningResults.suggestions.length > 0 && (
+                  <div>
+                    <div className="text-white font-medium mb-2">学习建议</div>
+                    <div className="space-y-2">
+                      {realLearningResults.suggestions.map((suggestion: string, index: number) => (
+                       <div key={index} className="bg-gray-800 p-3 rounded border border-gray-600">
+                         <div className="text-green-400 text-sm">{suggestion}</div>
+                       </div>
+                     ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 课程总结 */}
           <div>
             <h4 className="font-bold text-yellow-400 mb-3 text-lg flex items-center gap-2">
               <span>🤖</span>
-              AI学习总结
+              课程总结
             </h4>
+            
+            {/* API连接状态显示 */}
+            <div className="mb-4 p-3 rounded-lg border border-gray-600 bg-gray-700">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-white">API连接状态:</span>
+                <div className="flex items-center gap-2">
+                  {apiConnectionStatus === 'connected' && (
+                    <>
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-sm text-green-400">已连接</span>
+                    </>
+                  )}
+                  {apiConnectionStatus === 'error' && (
+                    <>
+                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                      <span className="text-sm text-red-400">连接失败</span>
+                    </>
+                  )}
+                  {apiConnectionStatus === 'unknown' && (
+                    <>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                      <span className="text-sm text-gray-400">检查中...</span>
+                    </>
+                  )}
+                  <button
+                    onClick={checkApiConnection}
+                    className="text-xs text-blue-400 hover:text-blue-300 underline"
+                  >
+                    重新检查
+                  </button>
+                </div>
+              </div>
+              {connectionError && (
+                <div className="mt-2 text-xs text-red-400 bg-red-900/30 p-2 rounded">
+                  {connectionError}
+                </div>
+              )}
+            </div>
+            
             <div className="bg-gray-700 rounded p-4 border border-gray-600">
               {isGeneratingSummary ? (
                 <div className="flex items-center gap-3 text-white">
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
-                  <span>正在生成个性化学习总结...</span>
+                  <span>正在生成个性化课程总结...</span>
                 </div>
               ) : aiSummary ? (
                 <div className="prose prose-invert max-w-none">
@@ -627,39 +1147,7 @@ ${scorePercentage >= 80 ?
           )}
         </div>
 
-        {/* 个性化学习建议 */}
-        <div className="bg-gray-800 border border-gray-600 rounded p-5 mb-6">
-          <h4 className="font-bold text-yellow-400 mb-3 text-lg flex items-center gap-2">
-            <span>💡</span>
-            个性化学习建议
-          </h4>
-          {learningRecommendations.length > 0 ? (
-            <ul className="text-white space-y-3">
-              {learningRecommendations.map((recommendation, index) => (
-                <li key={index} className="flex items-start gap-3">
-                  <span className="text-yellow-400 mt-1">•</span>
-                  <span className="leading-relaxed">{recommendation}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <ul className="text-white list-disc pl-5 space-y-2">
-              {score / totalQuestions >= 0.8 && understandingLevel >= 4 ? (
-                <>
-                  <li>你已经很好地掌握了这个知识点，可以继续学习新的内容</li>
-                  <li>建议定期复习，巩固记忆</li>
-                  <li>尝试将所学知识应用到实际问题中</li>
-                </>
-              ) : (
-                <>
-                  <li>建议重新学习这个知识点，重点关注薄弱环节</li>
-                  <li>可以尝试不同的学习方法，如观看视频、做练习题等</li>
-                  <li>如果有疑问，及时向老师或同学请教</li>
-                </>
-              )}
-            </ul>
-          )}
-        </div>
+
       </div>
 
       {/* 操作按钮 */}
