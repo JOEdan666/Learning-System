@@ -1,31 +1,6 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/"
-    }
-  ],
-  "env": {
-    "DATABASE_URL": "@database_url",
-    "OPENAI_API_KEY": "@openai_api_key",
-    "OPENAI_BASE_URL": "@openai_base_url",
-    "OPENAI_MODEL": "@openai_model",
-    "NEXTAUTH_URL": "@nextauth_url",
-    "NEXTAUTH_SECRET": "@nextauth_secret"
-  },
-  "build": {
-    "env": {
-      "DATABASE_URL": "@database_url",
-      "OPENAI_API_KEY": "@openai_api_key",
-      "OPENAI_BASE_URL": "@openai_base_url",
-      "OPENAI_MODEL": "@openai_model"
-    }
-  }
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "installCommand": "npm install"
 }

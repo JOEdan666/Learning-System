@@ -27,7 +27,6 @@ const nextConfig = {
     config.resolve.alias.canvas = false;
     return config;
   },
-  images: { unoptimized: true },
   
   // 临时忽略类型错误，以便部署
   typescript: { ignoreBuildErrors: true },
@@ -35,24 +34,6 @@ const nextConfig = {
   
   // 实验性功能
   experimental: { esmExternals: 'loose' },
-  
-  // 生产环境配置
-  env: {
-    DATABASE_URL: process.env.DATABASE_URL,
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-    OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
-    OPENAI_MODEL: process.env.OPENAI_MODEL,
-  },
-  
-  // 域名配置
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: '/api/:path*',
-      },
-    ];
-  },
 };
 
 module.exports = nextConfig;
