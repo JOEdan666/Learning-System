@@ -28,7 +28,10 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.OPENAI_API_KEY
     const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    // 支持从请求体指定模型与最大输出长度
+    const requestedModel = (body && body.model) ? String(body.model) : ''
+    const model = requestedModel || process.env.OPENAI_MODEL || 'deepseek-chat'
+    const max_tokens = typeof body?.max_tokens === 'number' ? body.max_tokens : undefined
 
     console.log('[API] 收到请求:', { 
       query: query ? query.substring(0, 50) + '...' : '(无query)', 
@@ -62,6 +65,7 @@ export async function POST(req: NextRequest) {
           messages,
           temperature: 0.7,
           stream: true,
+          ...(max_tokens ? { max_tokens } : {}),
         }),
         cache: 'no-store',
       })
@@ -117,17 +121,15 @@ export async function POST(req: NextRequest) {
                   }
                   try {
                     const json = JSON.parse(data)
-                    // 尝试从多种可能的位置提取内容，以兼容不同模型
-                    const delta = 
-                      json?.choices?.[0]?.delta?.content || 
-                      json?.choices?.[0]?.message?.content || 
+                    const deltaContent =
+                      json?.choices?.[0]?.delta?.content ||
+                      json?.choices?.[0]?.message?.content ||
                       ''
-                       
-                    if (delta) {
-                      totalContent += delta
+                    if (deltaContent) {
+                      totalContent += deltaContent
                       chunksSent++
-                      console.log(`[API] 发送数据块 #${chunksSent}:`, delta.substring(0, 30) + '...');
-                      controller.enqueue(encoder.encode(delta))
+                      console.log(`[API] 发送数据块 #${chunksSent}:`, deltaContent.substring(0, 30) + '...');
+                      controller.enqueue(encoder.encode(deltaContent))
                     }
                   } catch (e) {
                     console.error('[API] 解析JSON数据块失败:', e, '数据:', data);
@@ -144,9 +146,9 @@ export async function POST(req: NextRequest) {
                 }
               }
             }
-          } catch (e) {
-            console.error('[API] 处理流式响应时出错:', e);
-            controller.error(e)
+            } catch (e) {
+              console.error('[API] 处理流式响应时出错:', e);
+              controller.error(e)
           } finally {
             console.log('[API] 流式响应处理完成，总内容长度:', totalContent.length);
             controller.close()
@@ -174,6 +176,7 @@ export async function POST(req: NextRequest) {
         model,
         messages,
         temperature: 0.7,
+        ...(max_tokens ? { max_tokens } : {}),
       }),
       cache: 'no-store',
     })
@@ -192,10 +195,9 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await resp.json()
-    // 尝试从多种可能的位置提取内容
-    const content = 
-      data.choices?.[0]?.message?.content || 
-      data.choices?.[0]?.delta?.content || 
+    const content =
+      data.choices?.[0]?.message?.content ||
+      data.choices?.[0]?.delta?.content ||
       ''
     console.log('[API] 非流式响应内容长度:', content.length);
     return NextResponse.json({ content })

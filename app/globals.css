@@ -83,6 +83,44 @@ body.bg-astronaut > * {
   z-index: 1;
 }
 
+/* 学习页背景样式（优先使用 learn.jpg，缺失时回退 intelligent.jpg） */
+body.bg-learn {
+  position: relative;
+  min-height: 100vh;
+}
+
+body.bg-learn::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('/learn-image'), url('/learn.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  filter: blur(2px);
+  z-index: -2;
+}
+
+body.bg-learn::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.15));
+  z-index: -1;
+}
+
+body.bg-learn > * {
+  position: relative;
+  z-index: 1;
+}
+
 /* 自定义工具类 */
 @layer utilities {
   .content-auto {
@@ -139,6 +177,36 @@ body.bg-astronaut > * {
     pointer-events: none;
   }
 }
+
+/* Markdown 表格与内容渲染优化 */
+.markdown-body {
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { margin-top: 0.8rem; margin-bottom: 0.5rem; }
+.markdown-body p { margin: 0.5rem 0; }
+.markdown-body code { background: #f3f4f6; padding: 0.15rem 0.3rem; border-radius: 4px; }
+.markdown-body pre code { background: transparent; }
+.prose pre {
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+.prose code {
+  background: #eef2ff;
+  color: #1e293b;
+  padding: 0.15rem 0.3rem;
+  border-radius: 0.25rem;
+}
+.markdown-body table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+.markdown-body th, .markdown-body td { border: 1px solid #e5e7eb; padding: 0.5rem 0.6rem; }
+.markdown-body th { background: #f8fafc; font-weight: 600; }
+.markdown-body tbody tr:nth-child(odd) { background: #f9fafb; }
+.markdown-body thead { position: sticky; top: 0; }
+.markdown-body ul { list-style: disc; padding-left: 1.2rem; }
+.markdown-body ol { list-style: decimal; padding-left: 1.2rem; }
 
 @keyframes fadeIn {
   from {

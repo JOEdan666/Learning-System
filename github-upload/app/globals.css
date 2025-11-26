@@ -1,0 +1,182 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #165DFF; /* 蓝色主色调 */
+  --primary-dark: #0F4FD8; /* 深蓝辅助色调 */
+  --primary-light: #E8F3FF; /* 浅蓝 */
+  --secondary: #36CFFB; /* 天蓝色 */
+  --accent: #73C2FF; /* 浅蓝色点缀 */
+  --foreground-rgb: 10, 20, 30; /* 深色文本 */
+  --background-start-rgb: 248, 250, 252; /* 浅蓝背景开始 */
+  --background-end-rgb: 255, 255, 255; /* 白色背景结束 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 255, 255, 255; /* 白色文本 */
+    --background-start-rgb: 10, 20, 30; /* 深蓝黑背景开始 */
+    --background-end-rgb: 15, 25, 40; /* 深蓝背景结束 */
+  }
+}
+
+/* 定义Tailwind自定义颜色 */
+@layer base {
+  :root {
+    --color-primary: var(--primary);
+    --color-primary-dark: var(--primary-dark);
+    --color-primary-light: var(--primary-light);
+    --color-secondary: var(--secondary);
+    --color-accent: var(--accent);
+  }
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* 宇航员背景样式 */
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body.bg-astronaut {
+  position: relative;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+body.bg-astronaut::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url('/uni.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  filter: blur(2px);
+  z-index: -2;
+}
+
+body.bg-astronaut::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.15));
+  z-index: -1;
+}
+
+/* 确保内容在背景之上可见 */
+body.bg-astronaut > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* 自定义工具类 */
+@layer utilities {
+  .content-auto {
+    content-visibility: auto;
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+  
+  .animate-pulse-subtle {
+    animation: pulseSubtle 2s infinite;
+  }
+  
+  .animate-gradient {
+    background-size: 200% 200%;
+    animation: gradientMove 3s ease infinite;
+  }
+  
+  .glass-effect {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  
+  .dark .glass-effect {
+    background: rgba(13, 17, 23, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  
+  .tech-border {
+    position: relative;
+    border-radius: 0.5rem;
+  }
+  
+  .tech-border::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    background: linear-gradient(to right, var(--primary), var(--secondary), var(--accent), var(--primary)) border-box;
+    -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: destination-out;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulseSubtle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+@keyframes gradientMove {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}

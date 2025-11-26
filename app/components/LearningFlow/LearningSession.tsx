@@ -705,8 +705,8 @@ ${materialsContent}
             
             const score = questions.length > 0 ? Math.round((correctCount / questions.length) * 100) : 0;
             content = `测验完成！你的得分是 ${score} 分。`;
-            step.output = { quizResult: { score, correctCount, totalQuestions: questions.length } };
-            data = { score, correctCount, totalQuestions: questions.length };
+            step.output = { quizResult: { score, correctCount, totalQuestions: questions.length, userAnswers } };
+            data = { score, correctCount, totalQuestions: questions.length, userAnswers };
             nextState = 'REVIEW';
           } catch (error) {
             console.error('[LearningSession] 测验评分出错:', error);
@@ -1182,6 +1182,25 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
       // 自动保存学习进度到数据库
       if (conversationHistory && sessionToUse) {
         try {
+          // 汇总测验题目与答案（如果有）
+          const quizStep = learningService.getCurrentSession()?.steps.find(s => s.step === 'QUIZ' && s.output?.questions);
+          const quizQuestions = quizStep?.output?.questions || [];
+          const quizResult = quizStep?.output?.quizResult || {};
+          const userAnswersRaw = Array.isArray((quizResult as any).userAnswers) ? (quizResult as any).userAnswers : undefined;
+          const userAnswersNormalized = userAnswersRaw && quizQuestions.length
+            ? userAnswersRaw.map((ans: any, idx: number) => {
+                const q = quizQuestions[idx] || {};
+                const ua = typeof ans === 'object' ? ans.userAnswer ?? ans : ans;
+                const isCorrect = ua === q.correctAnswer;
+                return {
+                  questionId: q.id ?? idx,
+                  userAnswer: String(ua ?? ''),
+                  isCorrect,
+                  score: isCorrect ? (q.points || 10) : 0,
+                };
+              })
+            : undefined;
+
           const progressData = {
             conversationId: conversationHistory.id,
             subject: sessionToUse.subject,
@@ -1191,7 +1210,11 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
             aiExplanation: result.data?.explanation || stepContent,
             socraticDialogue: conversationHistory.messages || [],
             currentStep: result.nextState,
-            isCompleted: result.nextState === 'DONE'
+            isCompleted: result.nextState === 'DONE',
+            quizQuestions,
+            userAnswers: userAnswersNormalized,
+            finalScore: (quizResult as any).score,
+            stats: quizResult?.score ? { accuracy: quizResult.score, totalQuestions: quizResult.totalQuestions, correctAnswers: quizResult.correctCount } : undefined,
           };
           
           await LearningProgressClient.saveLearningProgress(progressData);

@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react';
+import TableRenderer from './TableRenderer';
 import { ConversationHistory, CreateConversationRequest } from '../types/conversation';
 import { ConversationService } from '../services/conversationService';
 import { ChatMessage } from '../utils/chatTypes';
@@ -8,6 +9,8 @@ import { SUBJECTS, LearningItem } from '../types';
 import { toast } from 'react-hot-toast';
 import { createProviderFromEnv } from '../services/ai';
 import type { AIProvider } from '../services/ai';
+import type { ChatMessage as AIChatMessage } from '../services/ai/types';
+import { KnowledgeBaseService, type KBItem } from '../services/knowledgeBaseService'
 
 // 地区选项
 const REGIONS = [
@@ -21,7 +24,7 @@ const REGIONS = [
 const GRADES = [
   '小学一年级', '小学二年级', '小学三年级', '小学四年级', '小学五年级', '小学六年级',
   '初中一年级', '初中二年级', '初中三年级',
-  '高中一年级', '高中二年级', '高中三年级'
+  '高中一年级', '高中二年级', '高中三年级', '大学','工作'
 ];
 
 interface UnifiedChatProps {
@@ -52,13 +55,53 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const aiProviderRef = useRef<AIProvider | null>(null);
   const conversationService = ConversationService.getInstance();
+  const [kbItems, setKbItems] = useState<KBItem[]>([])
+  const [kbService] = useState(() => new KnowledgeBaseService())
 
-  // 初始化AI Provider
+  // 将知识库构造成系统提示，供模型参考
+  const buildKnowledgeBasePrompt = (notes: LearningItem[], kb: KBItem[]): string | null => {
+    const items = notes || []
+    const kbIncluded = (kb || []).filter(it => it.include !== false && (it.text && it.text.trim().length > 0))
+    if (items.length === 0 && kbIncluded.length === 0) return null;
+    // 仅取最近的若干条，避免上下文过长
+    const MAX_ITEMS = 10;
+    const recentNotes = items.slice(-MAX_ITEMS).reverse();
+    const recentKb = kbIncluded.slice(0, MAX_ITEMS)
+    // 按学科分组
+    const bySubject: Record<string, string[]> = {};
+    for (const it of recentNotes) {
+      const subject = it.subject || '其他';
+      const text = (it.text || '').trim();
+      if (!text) continue;
+      const truncated = text.length > 600 ? (text.slice(0, 600) + '…') : text;
+      if (!bySubject[subject]) bySubject[subject] = [];
+      bySubject[subject].push(truncated);
+    }
+    // 知识库作为单独分组
+    if (recentKb.length > 0) {
+      bySubject['知识库'] = recentKb.map(it => {
+        const t = String(it.text || it.ocrText || it.notes || '').trim()
+        return t.length > 800 ? (t.slice(0, 800) + '…') : t
+      }).filter(Boolean)
+    }
+    const subjects = Object.keys(bySubject);
+    if (subjects.length === 0) return null;
+    const parts: string[] = [];
+    parts.push('你是我的学习助理。回答问题时优先基于下列知识库内容；若知识库没有相关信息，请明确说明并再进行通用回答：');
+    for (const s of subjects) {
+      parts.push(`【${s}】`);
+      const lines = bySubject[s].map((t, idx) => `${idx + 1}. ${t}`);
+      parts.push(lines.join('\n'));
+    }
+    return parts.join('\n');
+  };
+
+  // 初始化AI Provider（仅初始化一次，避免重复注册导致多次回调）
   useEffect(() => {
     const provider = createProviderFromEnv();
     if (provider) {
       aiProviderRef.current = provider;
-      
+
       // 设置消息处理器
       provider.onMessage(async (content: string, isFinal: boolean) => {
         if (!content && !isFinal) return;
@@ -67,6 +110,11 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
           const lastMessage = prev[prev.length - 1];
           const validContent = content || '';
           
+          // 避免在最终空内容事件或空增量时创建空消息
+          if (validContent.length === 0 && (!lastMessage || lastMessage.role !== 'assistant')) {
+            return prev;
+          }
+
           if (lastMessage && lastMessage.role === 'assistant') {
             // 更新最后一条助手消息
             const updatedContent = lastMessage.content + validContent;
@@ -145,12 +193,24 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
         aiProviderRef.current.close();
       }
     };
-  }, [selectedConversation]);
+  }, []);
 
   // 加载对话列表
   useEffect(() => {
     loadConversations();
   }, []);
+
+  // 加载知识库（用于注入AI上下文）
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await kbService.getItems()
+        setKbItems(list)
+      } catch (e) {
+        console.warn('加载知识库失败:', e)
+      }
+    })()
+  }, [kbService])
 
   // 滚动到底部
   useEffect(() => {
@@ -307,8 +367,19 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
       // 添加用户消息到对话
       await conversationService.addMessage(selectedConversation.id, userMessage);
 
-      // 发送到AI (使用Xunfei API)
-      await aiProviderRef.current.sendMessage(userMessage.content);
+      // 构造历史消息与知识库系统提示
+      const kbPrompt = buildKnowledgeBasePrompt(savedItems || [], kbItems || []);
+      const recentHistoryLimit = 10;
+      const recentHistory = messages.slice(-recentHistoryLimit).map(m => ({ role: m.role, content: m.content })) as AIChatMessage[];
+      const historyWithKb: AIChatMessage[] = [];
+      if (kbPrompt) {
+        historyWithKb.push({ role: 'system', content: kbPrompt });
+      }
+      // 将最近的历史加入，帮助模型延续上下文
+      historyWithKb.push(...recentHistory);
+
+      // 发送到AI，附带历史与系统提示
+      await aiProviderRef.current.sendMessage(userMessage.content, historyWithKb);
 
       // 注意：AI回复会通过onMessage回调处理，这里不需要手动添加回复消息
 
@@ -383,7 +454,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-gray-50">
+    <div className="min-h-screen flex bg-gray-50">
       {/* 左侧对话列表 */}
       <div className={`${selectedConversation && !showNewChatForm ? 'hidden lg:block' : 'block'} w-full lg:w-80 flex-shrink-0 bg-white border-r border-gray-200`}>
         <div className="h-full flex flex-col">
@@ -673,8 +744,8 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
                     </div>
                     <h3 className="text-sm font-medium text-green-800">AI智能讲解</h3>
                   </div>
-                  <div className="text-sm text-green-700 whitespace-pre-wrap break-words">
-                    {selectedConversation.aiExplanation}
+                  <div className="text-sm text-green-700 break-words">
+                    <TableRenderer content={selectedConversation.aiExplanation} />
                   </div>
                 </div>
               )}
@@ -691,15 +762,11 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
                         : 'bg-gray-100 text-gray-900'
                     }`}
                   >
-                    <div className="whitespace-pre-wrap break-words">
+                    <div className="break-words">
                       {message.role === 'assistant' ? (
-                        <div 
-                          dangerouslySetInnerHTML={{ 
-                            __html: formatAIMessage(message.content).replace(/\n/g, '<br/>') 
-                          }} 
-                        />
+                        <TableRenderer content={message.content} />
                       ) : (
-                        message.content
+                        <div className="whitespace-pre-wrap">{message.content}</div>
                       )}
                     </div>
                     {/* 显示图片（如果有） */}

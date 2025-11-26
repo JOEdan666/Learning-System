@@ -1,6 +1,7 @@
 'use client'
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import html2canvas from 'html2canvas';
@@ -102,12 +103,12 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
             } else {
               // 非表格内容使用ReactMarkdown渲染
               return (
-                <ReactMarkdown
-                  key={index}
-                  remarkPlugins={[remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={customComponents}
-                >
+                  <ReactMarkdown
+                    key={index}
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={customComponents}
+                  >
                   {part.content}
                 </ReactMarkdown>
               );
@@ -117,13 +118,13 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
       );
     } else {
       // 如果没有表格，直接使用ReactMarkdown
-      return (
-        <ReactMarkdown
-          remarkPlugins={[remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={customComponents}
-        >
-          {content}
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={customComponents}
+      >
+        {content}
         </ReactMarkdown>
       );
     }

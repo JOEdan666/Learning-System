@@ -22,6 +22,7 @@ export default function ConversationList({
   const [total, setTotal] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<ConversationType | 'all'>('all');
+  const [groupBySubject, setGroupBySubject] = useState<boolean>(false);
   
   const conversationService = ConversationService.getInstance();
   const pageSize = 20;
@@ -172,6 +173,13 @@ export default function ConversationList({
             普通对话
           </button>
         </div>
+        {/* 分组开关 */}
+        <div className="mt-2">
+          <label className="inline-flex items-center gap-2 text-xs text-gray-600">
+            <input type="checkbox" checked={groupBySubject} onChange={(e)=>setGroupBySubject(e.target.checked)} />
+            按学科分组
+          </label>
+        </div>
       </div>
 
       {/* 对话列表 */}
@@ -182,59 +190,74 @@ export default function ConversationList({
           </div>
         ) : (
           <div className="space-y-1 p-2">
-            {conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                onClick={() => onSelectConversation(conversation)}
-                className={`p-3 rounded-lg cursor-pointer transition-colors group ${
-                  selectedConversationId === conversation.id
-                    ? 'bg-blue-50 border border-blue-200'
-                    : 'hover:bg-gray-50'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    {/* 标题和类型 */}
-                    <div className="flex items-center space-x-2 mb-1">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">
-                        {conversation.title}
-                      </h3>
-                      <span
-                        className={`px-2 py-0.5 text-xs rounded-full ${
-                          conversation.type === 'learning'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-purple-100 text-purple-700'
-                        }`}
-                      >
-                        {conversation.type === 'learning' ? '学习' : '对话'}
-                      </span>
+            {groupBySubject ? (
+              Object.entries(
+                conversations.reduce<Record<string, ConversationHistory[]>>((acc, c) => {
+                  const key = c.subject || '通用';
+                  (acc[key] ||= []).push(c);
+                  return acc;
+                }, {})
+              ).map(([subject, list]) => (
+                <div key={subject}>
+                  <div className="px-2 py-1 text-xs font-semibold text-gray-500">{subject}</div>
+                  {list.map((conversation) => (
+                    <div
+                      key={conversation.id}
+                      onClick={() => onSelectConversation(conversation)}
+                      className={`p-3 rounded-lg cursor-pointer transition-colors group ${
+                        selectedConversationId === conversation.id
+                          ? 'bg-blue-50 border border-blue-200'
+                          : 'hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-2 mb-1">
+                            <h3 className="text-sm font-medium text-gray-900 truncate">{conversation.title}</h3>
+                            <span className={`px-2 py-0.5 text-xs rounded-full ${conversation.type === 'learning' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{conversation.type === 'learning' ? '学习' : '对话'}</span>
+                          </div>
+                          <p className="text-xs text-gray-600 truncate mb-1">{getConversationPreview(conversation)}</p>
+                          <div className="flex items-center justify-between text-xs text-gray-500">
+                            <span>{conversation.messageCount} 条消息</span>
+                            <span>{formatTime(conversation.lastActivity)}</span>
+                          </div>
+                        </div>
+                        <button onClick={(e) => handleDeleteConversation(conversation.id, e)} className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" title="删除对话">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
                     </div>
-                    
-                    {/* 预览内容 */}
-                    <p className="text-xs text-gray-600 truncate mb-1">
-                      {getConversationPreview(conversation)}
-                    </p>
-                    
-                    {/* 元信息 */}
-                    <div className="flex items-center justify-between text-xs text-gray-500">
-                      <span>{conversation.messageCount} 条消息</span>
-                      <span>{formatTime(conversation.lastActivity)}</span>
-                    </div>
-                  </div>
-                  
-                  {/* 删除按钮 */}
-                  <button
-                    onClick={(e) => handleDeleteConversation(conversation.id, e)}
-                    className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="删除对话"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
+                  ))}
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              conversations.map((conversation) => (
+                <div
+                  key={conversation.id}
+                  onClick={() => onSelectConversation(conversation)}
+                  className={`p-3 rounded-lg cursor-pointer transition-colors group ${
+                    selectedConversationId === conversation.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <h3 className="text-sm font-medium text-gray-900 truncate">{conversation.title}</h3>
+                        <span className={`px-2 py-0.5 text-xs rounded-full ${conversation.type === 'learning' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}`}>{conversation.type === 'learning' ? '学习' : '对话'}</span>
+                      </div>
+                      <p className="text-xs text-gray-600 truncate mb-1">{getConversationPreview(conversation)}</p>
+                      <div className="flex items-center justify-between text-xs text-gray-500">
+                        <span>{conversation.messageCount} 条消息</span>
+                        <span>{formatTime(conversation.lastActivity)}</span>
+                      </div>
+                    </div>
+                    <button onClick={(e) => handleDeleteConversation(conversation.id, e)} className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" title="删除对话">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a 1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
         

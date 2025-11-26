@@ -1,7 +1,7 @@
 'use client'
 // AI聊天组件
 import { castToChat } from '../utils/chatTypes'
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import type { LearningItem } from '../types';
 import type { AIProvider } from '../services/ai';
 import { createProviderFromEnv } from '../services/ai';
@@ -12,6 +12,7 @@ import { ConversationService } from '../services/conversationService';
 import { ConversationHistory, ConversationType } from '../types/conversation';
 import { ChatMessage, Role } from '../utils/chatTypes';
 import TableRenderer from './TableRenderer';
+import { applyFeedback, getDueEntries, upsertFromItems, ReviewEntry } from '../utils/reviewPlanner';
 
 interface AIChatProps {
   savedItems: LearningItem[];
@@ -23,6 +24,7 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUserMessage, setLastUserMessage] = useState<string>('');
   const [showSavedContent, setShowSavedContent] = useState(false);
   const [showLearningFlow, setShowLearningFlow] = useState(false);
   const [conversations, setConversations] = useState<ConversationHistory[]>([]);
@@ -31,8 +33,19 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
   const [editingTitle, setEditingTitle] = useState('');
   const [showSidebar, setShowSidebar] = useState(true); // 控制对话列表的显示/隐藏
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const apiServiceRef = useRef<AIProvider | null>(null);
   const conversationService = ConversationService.getInstance();
+  const [expandedReasoning, setExpandedReasoning] = useState<Record<number, boolean>>({});
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [dueReviews, setDueReviews] = useState<ReviewEntry[]>([]);
+  const resizeTextarea = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+  };
 
   // 从环境变量创建 Provider；保持与原有环境变量兼容
   const DEBUG_MODE = (process.env.NEXT_PUBLIC_XUNFEI_DEBUG === 'true') || (process.env.NEXT_PUBLIC_AI_DEBUG === 'true');
@@ -137,6 +150,14 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     loadConversations();
   }, []);
 
+  useEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    if (autoScroll || isAtBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages, isLoading, autoScroll, isAtBottom]);
+
   // 当消息变化时，保存到当前对话
   useEffect(() => {
     if (!activeConversation || messages.length === 0) return;
@@ -148,11 +169,11 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
           messages: messages
         });
 
-        // 自动生成标题：当消息数量达到4条且标题是默认标题时
-        if (messages.length >= 4 && 
+        const provisional = activeConversation.title === deriveTitle(messages)
+        if (messages.length >= 3 && 
             (activeConversation.title.includes('对话') || 
              activeConversation.title === '新对话' ||
-             activeConversation.title.includes(new Date().toLocaleString('zh-CN')))) {
+             activeConversation.title.includes(new Date().toLocaleString('zh-CN')) || provisional)) {
           
           try {
             const titleResponse = await conversationService.generateTitle({
@@ -227,6 +248,8 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     if (conv) {
       setActiveConversation(conv);
       setMessages(conv.messages);
+      setAutoScroll(true);
+      setIsAtBottom(true);
     }
   };
 
@@ -241,6 +264,8 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
       setConversations(prev => [newConversation, ...prev]);
       setMessages([]);
       setInputMessage('');
+      setAutoScroll(true);
+      setIsAtBottom(true);
     } catch (e) {
       console.error('创建新对话失败:', e);
       toast.error('创建新对话失败');
@@ -284,6 +309,8 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
 
   // 删除会话
   const handleDeleteConversation = async (id: string) => {
+    const confirmDelete = window.confirm('确认删除该对话？删除后无法恢复。');
+    if (!confirmDelete) return;
     try {
       await conversationService.deleteConversation(id);
       
@@ -306,27 +333,65 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     }
   };
 
+  const buildContext = (chunks: { file: string; position: number; content: string }[]) => {
+    if (!chunks || chunks.length === 0) return '';
+    const formatted = chunks
+      .map((c, idx) => `${idx + 1}. [${c.file} #${c.position}] ${c.content}`)
+      .join('\n');
+    return `以下是内置学习资料片段，请严格基于这些内容回答，并标注对应的文件与片段编号。若资料不足请说明：\n${formatted}\n\n用户问题：`;
+  };
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading || !apiServiceRef.current) return;
 
     try {
-      // 确保有激活的会话
-      const convId = ensureActiveConversation();
-      
+      let contextPrefix = '';
+      try {
+        const res = await fetch('/api/internal-knowledge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: inputMessage, limit: 5 })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          contextPrefix = buildContext(data.chunks || []);
+        }
+      } catch (e) {
+        console.warn('检索内置资料失败', e);
+      }
+
+      const contentForAI = contextPrefix ? `${contextPrefix}\n${inputMessage}` : inputMessage;
       const userMessage: MessageItem = { role: 'user', content: inputMessage };
+      setLastUserMessage(contentForAI);
+      await ensureActiveConversation([userMessage]);
       setMessages(prev => [...prev, userMessage]);
+      setAutoScroll(true);
+      setIsAtBottom(true);
       setInputMessage('');
       setIsLoading(true);
       setError(null);
-
-      // 发送消息到AI服务
-      await apiServiceRef.current.sendMessage(inputMessage);
+      await apiServiceRef.current.sendMessage(contentForAI);
     } catch (err) {
       console.error('发送消息失败:', err);
       setError('发送消息失败: ' + (err as Error).message);
       setIsLoading(false);
     }
   };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputMessage(e.target.value);
+    resizeTextarea();
+  };
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [inputMessage]);
+
+  useEffect(() => {
+    const seeded = upsertFromItems(savedItems);
+    setDueReviews(getDueEntries());
+    // 更新存储时不会自动触发，故监听 savedItems 变化
+  }, [savedItems]);
 
   // 处理键盘事件（发送消息）
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -378,35 +443,100 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
   };
 
   // 渲染单条消息
-  const renderMessage = (message: MessageItem, index: number) => (
-    <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div className={`max-w-[80%] p-3 rounded-lg ${
-        message.role === 'user' 
-          ? 'bg-primary text-white' 
-          : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 shadow-sm'
-      }`}>
-        <div className="prose prose-sm dark:prose-invert max-w-none">
-          {message.role === 'assistant' ? (
-            <TableRenderer content={formatAIMessage(message.content).replace(/\n/g, '<br/>')} />
-          ) : (
-            message.content
+  const renderMessage = (message: MessageItem, index: number) => {
+    const contentStr = message.content || ''
+    const match = contentStr.match(/\[\[REASONING_START\]\]([\s\S]*?)\[\[REASONING_END\]\]/)
+    const reasoning = match ? match[1].trim() : ''
+    const answer = match ? contentStr.replace(match[0], '').trim() : contentStr
+    const isExpanded = !!expandedReasoning[index]
+    const toggle = () => setExpandedReasoning(prev => ({ ...prev, [index]: !prev[index] }))
+    return (
+      <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
+        <div className={`relative max-w-[80%] p-3 rounded-lg ${
+          message.role === 'user' 
+            ? 'bg-primary text-white' 
+            : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 shadow-sm'
+        }`}>
+          {message.role === 'assistant' && (
+            <button
+              type="button"
+              className="absolute top-2 right-2 text-xs text-primary dark:text-primary hover:underline"
+              onClick={() => copyMessage(answer)}
+            >
+              复制
+            </button>
           )}
+          <div className="max-w-none">
+            {message.role === 'assistant' ? (
+              (() => {
+                return (
+                  <>
+                    <TableRenderer content={answer} />
+                    {reasoning && (
+                      <div className="mt-2 border-t dark:border-gray-700 pt-2">
+                        <button
+                          type="button"
+                          onClick={toggle}
+                          className="text-xs text-primary dark:text-primary hover:underline"
+                        >{isExpanded ? '隐藏思考过程' : '显示思考过程'}</button>
+                        {isExpanded && (
+                          <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                            {reasoning}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )
+              })()
+            ) : (
+              <TableRenderer content={message.content || ''} />
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    )
+  };
 
   // 将LearningItem数组转换为LearningStep数组
-  const convertLearningItemsToLearningSteps = (items: LearningItem[]): any[] => {
-    return items.map((item, index) => ({
+  const convertLearningItemsToLearningSteps = useMemo(() => {
+    return savedItems.map((item) => ({
       id: item.id,
-      sessionId: 'session_' + Date.now(),
+      sessionId: 'session_' + item.id,
       step: 'EXPLAIN' as const,
       input: { userInput: item.text },
       output: { explanation: item.text },
       createdAt: new Date(item.createdAt)
     }));
+  }, [savedItems]);
+
+  const handleChatScroll = () => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const distanceToBottom = scrollHeight - (scrollTop + clientHeight);
+    setIsAtBottom(distanceToBottom < 48);
+    if (distanceToBottom < 8) {
+      setAutoScroll(true);
+    } else if (distanceToBottom > 48) {
+      setAutoScroll(false);
+    }
   };
+
+  const copyMessage = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      toast.success('已复制内容');
+    } catch {
+      toast.error('复制失败');
+    }
+  };
+
+  const quickTemplates = [
+    '用思维导图讲清楚勾股定理，并给 3 道练习题。',
+    '根据江苏中考英语要求，生成一份听说训练对话稿和评分要点。',
+    '把这段历史事件总结成时间线表格，并给到选择题和答案。',
+  ];
 
   // 渲染已保存内容
   const renderSavedContent = () => {
@@ -537,21 +667,111 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
             )}
             <div className="font-medium text-gray-700 dark:text-gray-200 truncate">{activeConversation?.title || '新对话'}</div>
           </div>
-          <div className="text-xs text-gray-400 dark:text-gray-500">{savedItems.length > 0 ? `已保存学习内容 ${savedItems.length} 项` : '无已保存内容'}</div>
+          <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
+            <span>{savedItems.length > 0 ? `已保存学习内容 ${savedItems.length} 项` : '无已保存内容'}</span>
+            <div className="relative group">
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200 border border-amber-200 dark:border-amber-700 cursor-pointer">
+                <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" aria-hidden />
+                待复习 {dueReviews.length} 条
+              </span>
+              <div className="absolute right-0 mt-2 w-72 rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-2 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity">
+                <div className="flex items-center justify-between text-xs text-amber-700 dark:text-amber-200">
+                  <span>待复习列表</span>
+                  <span>{dueReviews.length} 条</span>
+                </div>
+                {dueReviews.length === 0 ? (
+                  <div className="text-xs text-amber-700/80 dark:text-amber-200/80">暂无待复习内容</div>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {dueReviews.slice(0, 5).map((item) => (
+                      <div key={item.id} className="p-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-700">
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 mb-1">{item.subject}</div>
+                        <div className="text-xs text-gray-800 dark:text-gray-100 line-clamp-2">{item.text}</div>
+                        <div className="mt-2 flex gap-1 text-[11px]">
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200"
+                            onClick={() => {
+                              applyFeedback(item.id, 'remember');
+                              setDueReviews(getDueEntries());
+                            }}
+                          >记得</button>
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+                            onClick={() => {
+                              applyFeedback(item.id, 'fuzzy');
+                              setDueReviews(getDueEntries());
+                            }}
+                          >模糊</button>
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200"
+                            onClick={() => {
+                              applyFeedback(item.id, 'forgot');
+                              setDueReviews(getDueEntries());
+                            }}
+                          >忘记</button>
+                        </div>
+                      </div>
+                    ))}
+                    {dueReviews.length > 5 && (
+                      <div className="text-[11px] text-amber-700 dark:text-amber-200">还有 {dueReviews.length - 5} 条…</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* 错误提示 */}
         {error && (
-          <div className="bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 px-4 py-3 border-b dark:border-red-800/30">{error}</div>
+          <div className="bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 px-4 py-3 border-b dark:border-red-800/30 flex items-center justify-between gap-3 flex-wrap">
+            <span>{error}</span>
+            <div className="flex items-center gap-2">
+              {lastUserMessage && (
+                <button
+                  type="button"
+                  className="text-xs underline text-primary dark:text-primary"
+                  onClick={async () => {
+                    if (!apiServiceRef.current || isLoading) return;
+                    try {
+                      setError(null);
+                      setIsLoading(true);
+                      await apiServiceRef.current.sendMessage(lastUserMessage);
+                    } catch (e) {
+                      setError('重试失败: ' + (e as Error).message);
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }}
+                >
+                  重试发送
+                </button>
+              )}
+              <button
+                type="button"
+                className="text-xs underline text-primary dark:text-primary"
+                onClick={() => window?.location?.reload()}
+              >
+                重试连接
+              </button>
+            </div>
+          </div>
         )}
 
         {/* 聊天内容区域 */}
-        <div ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+        <div
+          ref={chatContainerRef}
+          onScroll={handleChatScroll}
+          className="relative flex-1 p-4 overflow-y-auto bg-gray-50 dark:bg-gray-900"
+        >
           {showLearningFlow ? (
             <div className="max-w-4xl mx-auto">
               {/* 修复类型错误：savedItems应该符合LearningSession的要求 */}
               <LearningSession 
-                savedItems={convertLearningItemsToLearningSteps(savedItems)} 
+                savedItems={convertLearningItemsToLearningSteps} 
                 onExit={() => setShowLearningFlow(false)} 
               />
             </div>
@@ -566,6 +786,20 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
                 </div>
               )}
             </div>
+          )}
+          {!isAtBottom && !autoScroll && (
+            <button
+              type="button"
+              className="fixed bottom-24 right-4 md:bottom-28 md:right-6 px-3 py-2 rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 text-xs"
+              onClick={() => {
+                const el = chatContainerRef.current;
+                if (!el) return;
+                el.scrollTop = el.scrollHeight;
+                setAutoScroll(true);
+              }}
+            >
+              回到底部
+            </button>
           )}
         </div>
 
@@ -586,28 +820,98 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
             </button>
           </div>
           {showSavedContent && (
-            <div className="mt-2">{renderSavedContent()}</div>
+            <div className="mt-2 space-y-3">
+              {dueReviews.length > 0 && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-2">
+                  <div className="text-sm font-semibold text-amber-700 dark:text-amber-300 mb-2">待复习（基于遗忘曲线）</div>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {dueReviews.map((item) => (
+                      <div key={item.id} className="p-2 rounded border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-800">
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">{item.subject}</div>
+                        <div className="text-sm text-gray-800 dark:text-gray-100 line-clamp-2">{item.text}</div>
+                        <div className="mt-2 flex gap-2 text-xs">
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200"
+                            onClick={() => {
+                              const updated = applyFeedback(item.id, 'remember');
+                              setDueReviews(getDueEntries());
+                              toast.success('记得：下次间隔已拉长');
+                            }}
+                          >
+                            记得
+                          </button>
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+                            onClick={() => {
+                              applyFeedback(item.id, 'fuzzy');
+                              setDueReviews(getDueEntries());
+                              toast('稍微模糊，间隔缩短');
+                            }}
+                          >
+                            模糊
+                          </button>
+                          <button
+                            type="button"
+                            className="px-2 py-1 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200"
+                            onClick={() => {
+                              applyFeedback(item.id, 'forgot');
+                              setDueReviews(getDueEntries());
+                              toast('忘记了，重置到短间隔');
+                            }}
+                          >
+                            忘记
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {renderSavedContent()}
+            </div>
           )}
         </div>
 
         {/* 输入区域 */}
         <div className="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-800">
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-2xl mx-auto space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {quickTemplates.map((tpl, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className="text-xs px-3 py-1 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                  onClick={() => {
+                    setInputMessage(tpl);
+                    resizeTextarea();
+                  }}
+                >
+                  {tpl}
+                </button>
+              ))}
+            </div>
             <textarea
+              ref={textareaRef}
               value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
+              onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder="输入您的问题，按Enter发送，Shift+Enter换行..."
               className="w-full pl-4 pr-12 py-2 border dark:border-gray-600 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm bg-white dark:bg-gray-800 dark:text-white mx-auto shadow-sm hover:shadow-md transition-all duration-300"
-              disabled={isLoading}
-              style={{ height: '32px', overflow: 'hidden' }}
+              disabled={isLoading || !!error || !apiServiceRef.current}
+              style={{ minHeight: '48px', overflow: 'auto' }}
             />
             <div className="flex justify-end mt-2">
               <button
-              onClick={handleSendMessage}
-              disabled={!inputMessage.trim() || isLoading}
-              className={`px-4 py-2 rounded-md text-white transition-colors ${inputMessage.trim() && !isLoading ? 'bg-primary hover:bg-primary/90' : 'bg-slate-300 dark:bg-slate-600 cursor-not-allowed'}`}
-            >
+                onClick={handleSendMessage}
+                disabled={!inputMessage.trim() || isLoading || !!error || !apiServiceRef.current}
+                className={`px-4 py-2 rounded-md text-white transition-colors ${
+                  inputMessage.trim() && !isLoading && !error && apiServiceRef.current
+                    ? 'bg-primary hover:bg-primary/90'
+                    : 'bg-slate-300 dark:bg-slate-600 cursor-not-allowed'
+                }`}
+              >
                 {isLoading ? '发送中...' : '发送'}
               </button>
             </div>

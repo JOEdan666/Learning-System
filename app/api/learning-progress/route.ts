@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import LearningProgressService from '@/app/services/learningProgressService';
+import { PrismaClient } from '@/app/generated/prisma';
+const prisma = new PrismaClient();
 
 // GET - 获取学习进度
 export async function GET(request: NextRequest) {
@@ -107,9 +109,40 @@ export async function POST(request: NextRequest) {
       await LearningProgressService.saveQuizQuestions(progress.id, quizQuestions);
     }
 
-    // 如果有用户答案，保存用户答案
+    // 如果有用户答案，保存用户答案（将前端索引/占位ID映射为数据库真实题目ID）
     if (userAnswers && userAnswers.length > 0) {
-      await LearningProgressService.saveUserAnswers(progress.id, userAnswers);
+      try {
+        // 获取该会话的题目列表，按order排序
+        const questions = await prisma.quizQuestion.findMany({
+          where: { sessionId: progress.id },
+          orderBy: { order: 'asc' },
+          select: { id: true, order: true, question: true }
+        });
+
+        const mapped = userAnswers
+          .map((ans: any, idx: number) => {
+            const qByIndex = questions[idx];
+            // 支持questionId为数字/字符串索引用于回退匹配
+            const raw = ans.questionId as any;
+            const num = typeof raw === 'number' ? raw : (raw && /^\d+$/.test(String(raw)) ? parseInt(String(raw), 10) : NaN);
+            const qByOrder = Number.isFinite(num)
+              ? (questions.find(q => q.order === num) || questions.find(q => q.order === num + 1))
+              : undefined;
+            const realId = (qByIndex?.id) || (qByOrder?.id);
+            if (!realId) return null;
+            return {
+              ...ans,
+              questionId: realId,
+            };
+          })
+          .filter(Boolean);
+
+        if (mapped.length > 0) {
+          await LearningProgressService.saveUserAnswers(progress.id, mapped as any);
+        }
+      } catch (e) {
+        console.warn('用户答案ID映射失败，跳过保存用户答案:', e);
+      }
     }
 
     // 如果有统计数据，保存统计数据
@@ -140,10 +173,12 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // 读取现有会话，避免覆盖必填字段为空字符串
+    const existing = await LearningProgressService.getLearningProgress(conversationId);
     const learningProgress = await LearningProgressService.saveLearningProgress({
       conversationId,
-      subject: '', // 这些字段在更新时可以为空
-      topic: '',
+      subject: existing?.subject || '未设置',
+      topic: existing?.topic || '未设置',
       aiExplanation,
       socraticDialogue,
       currentStep,

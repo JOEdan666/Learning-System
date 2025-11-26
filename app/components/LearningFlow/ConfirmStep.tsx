@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { CheckCircle, XCircle, BookOpen } from 'lucide-react';
 import TableRenderer, { parseMarkdownTable } from '../TableRenderer';
 
@@ -159,6 +160,7 @@ const ConfirmStep: React.FC<ConfirmStepProps> = ({
               return (
                 <ReactMarkdown
                   key={index}
+                  remarkPlugins={[remarkGfm]}
                   components={customComponents}
                 >
                   {part.content}
@@ -171,7 +173,7 @@ const ConfirmStep: React.FC<ConfirmStepProps> = ({
     } else {
       // 如果没有表格，直接使用ReactMarkdown
       return (
-        <ReactMarkdown components={customComponents}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={customComponents}>
           {content}
         </ReactMarkdown>
       );

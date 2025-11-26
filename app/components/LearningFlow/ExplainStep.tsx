@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LearningState } from '../../types/learning';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
@@ -38,10 +39,22 @@ const customComponents = {
   ol: ({node, ...props}: any) => <ol className="list-decimal pl-6 mb-6 space-y-2" {...props} />,
   li: ({node, ...props}: any) => <li className="text-blue-900 leading-relaxed text-lg" {...props} />,
   blockquote: ({node, ...props}: any) => <blockquote className="border-l-4 border-blue-400 pl-6 italic text-blue-800 bg-blue-50 py-4 rounded-r-lg my-6 shadow-sm" {...props} />,
-  code: ({node, inline, ...props}: any) => 
-    inline 
-      ? <code className="bg-blue-100 rounded px-2 py-1 font-mono text-sm text-indigo-700" {...props} />
-      : <code className="block bg-blue-50 rounded-lg p-4 font-mono text-sm overflow-x-auto text-blue-900 border border-blue-200" {...props} />,
+  code: ({node, inline, className, children, ...props}: any) => {
+    const match = /language-(\w+)/.exec(className || '')
+    const lang = match?.[1] || ''
+    if (inline) return <code className="bg-blue-100 rounded px-1.5 py-0.5 font-mono text-sm text-indigo-700" {...props}>{children}</code>
+    const text = String(children || '')
+    const copy = () => navigator.clipboard?.writeText(text).catch(()=>{})
+    return (
+      <div className="relative group my-3">
+        <div className="absolute top-2 left-2 text-[10px] uppercase tracking-wider text-blue-600/70">{lang || 'text'}</div>
+        <button type="button" onClick={copy} className="absolute top-2 right-2 text-[11px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 opacity-0 group-hover:opacity-100 transition">复制</button>
+        <pre className="bg-blue-50 rounded-lg p-3 overflow-x-auto mb-4 border border-blue-200 text-blue-900 text-sm">
+          <code className="font-mono whitespace-pre" {...props}>{children}</code>
+        </pre>
+      </div>
+    )
+  },
   pre: ({node, ...props}: any) => <pre className="bg-blue-50 rounded-lg p-4 overflow-x-auto mb-6 border border-blue-200" {...props} />,
   // 表格样式组件 - 简洁整洁的表格外观
   table: ({node, ...props}: any) => (
@@ -62,10 +75,128 @@ const customComponents = {
   tr: ({node, ...props}: any) => <tr className="bg-white even:bg-gray-50 hover:bg-blue-50 transition-colors duration-200" {...props} />,
 };
 
+// 简易知识导图渲染（支持展开/折叠、缩放、平移）
+function MindMap({ lines }: { lines: string[] }) {
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const [lastPos, setLastPos] = useState<{x:number;y:number}|null>(null);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const onWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = -e.deltaY;
+    const next = Math.min(2, Math.max(0.6, scale + delta * 0.0015));
+    setScale(next);
+  };
+  const onMouseDown = (e: React.MouseEvent) => { setDragging(true); setLastPos({ x: e.clientX, y: e.clientY }); };
+  const onMouseUp = () => { setDragging(false); setLastPos(null); };
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!dragging || !lastPos) return;
+    const dx = e.clientX - lastPos.x; const dy = e.clientY - lastPos.y;
+    setOffset(o => ({ x: o.x + dx, y: o.y + dy }));
+    setLastPos({ x: e.clientX, y: e.clientY });
+  };
+  const toggle = (key: string) => setCollapsed(c => ({ ...c, [key]: !c[key] }));
+
+  const parseTree = (ls: string[]) => {
+    const items = ls.map(l => ({ raw: l, level: (l.match(/^\s*/)?.[0]?.length || 0) / 2, text: l.trim() })).filter(i => i.text);
+    const root: any = { children: [] };
+    const stack: any[] = [root];
+    items.forEach((it, idx) => {
+      const node = { key: `${idx}-${it.text}`, text: it.text, children: [] } as any;
+      const level = Math.max(0, Math.min(it.level, stack.length - 1 + 1));
+      while (stack.length - 1 > level) stack.pop();
+      stack[stack.length - 1].children.push(node);
+      stack.push(node);
+    });
+    return root.children;
+  };
+
+  const nodes = parseTree(lines);
+
+  const renderNode = (node: any, depth = 0) => {
+    const k = node.key;
+    const isCollapsed = collapsed[k];
+    return (
+      <div className="ml-4">
+        <div className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border ${depth===0?'border-blue-300 bg-blue-50':'border-slate-300 bg-white'} shadow-sm`}
+             onClick={() => toggle(k)}>
+          <span className="text-sm font-semibold text-slate-700">{node.text}</span>
+          <span className="text-xs text-slate-500">{isCollapsed ? '展开' : '收起'}</span>
+        </div>
+        {!isCollapsed && node.children?.length > 0 && (
+          <div className="mt-2 pl-4 border-l-2 border-slate-200">
+            {node.children.map((child: any) => (
+              <div key={child.key} className="mt-2">{renderNode(child, depth+1)}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center justify-between px-3 py-2 border-b">
+        <div className="text-sm font-semibold text-slate-700">知识导图</div>
+        <div className="flex items-center gap-2">
+          <button className="px-2 py-1 rounded border" onClick={() => setScale(s=>Math.min(2, s+0.1))}>＋</button>
+          <button className="px-2 py-1 rounded border" onClick={() => setScale(s=>Math.max(0.6, s-0.1))}>－</button>
+          <button className="px-2 py-1 rounded border" onClick={() => { setScale(1); setOffset({x:0,y:0}); }}>重置</button>
+        </div>
+      </div>
+      <div className="relative h-80 overflow-hidden cursor-grab"
+           onWheel={onWheel} onMouseDown={onMouseDown} onMouseUp={onMouseUp} onMouseLeave={onMouseUp} onMouseMove={onMouseMove}>
+        <div className="absolute" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}>
+          <div className="p-4">
+            {nodes.map((n:any)=> (
+              <div key={n.key} className="mb-3">{renderNode(n)}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 将 AI 输出中的“知识导图”与特殊符号规范化为 Markdown 列表
+const normalizeMindmap = (raw: string) => {
+  const lines = raw.split('\n')
+  return lines
+    .map((line) => {
+      const trimmed = line.trim()
+      if (/^[•\-–—·◦▪]/.test(trimmed)) return `- ${trimmed.replace(/^[•\-–—·◦▪]\s?/, '')}`
+      if (/^(├─|└─|│|—|–)/.test(trimmed)) return `- ${trimmed.replace(/^(├─|└─|│|—|–)\s?/, '')}`
+      return line
+    })
+    .join('\n')
+}
+
 // 混合渲染函数：检测表格并选择合适的渲染方式
 const renderContentWithTables = (content: string) => {
+  const normalized = normalizeMindmap(content)
+  // 提取知识导图块
+  const mmIndex = normalized.indexOf('【知识导图】');
+  let mindmapBlock: string | null = null;
+  let contentForRender = normalized;
+  if (mmIndex >= 0) {
+    const before = normalized.substring(0, mmIndex);
+    const afterStart = mmIndex + '【知识导图】'.length;
+    const rest = normalized.substring(afterStart);
+    const lines = rest.split('\n');
+    const collected: string[] = [];
+    for (let i=0; i<lines.length; i++) {
+      const line = lines[i];
+      if (/^\s*$/.test(line) || /^##\s|^【/.test(line)) break;
+      collected.push(line);
+    }
+    mindmapBlock = collected.join('\n');
+    const after = lines.slice(collected.length).join('\n');
+    contentForRender = [before.trim(), after.trim()].filter(Boolean).join('\n\n');
+  }
   // 检查内容是否包含表格
-  const hasTable = parseMarkdownTable(content) !== null;
+  const hasTable = parseMarkdownTable(contentForRender) !== null;
   
   if (hasTable) {
     // 如果包含表格，使用改进的分割逻辑
@@ -77,10 +208,10 @@ const renderContentWithTables = (content: string) => {
     // 重置正则表达式的lastIndex
     tableRegex.lastIndex = 0;
     
-    while ((match = tableRegex.exec(content)) !== null) {
+    while ((match = tableRegex.exec(contentForRender)) !== null) {
       // 添加表格前的内容
       if (match.index > lastIndex) {
-        const beforeTable = content.substring(lastIndex, match.index).trim();
+        const beforeTable = contentForRender.substring(lastIndex, match.index).trim();
         if (beforeTable) {
           parts.push({ type: 'markdown', content: beforeTable });
         }
@@ -93,15 +224,18 @@ const renderContentWithTables = (content: string) => {
     }
     
     // 添加最后一个表格后的内容
-    if (lastIndex < content.length) {
-      const afterTable = content.substring(lastIndex).trim();
+      if (lastIndex < contentForRender.length) {
+        const afterTable = contentForRender.substring(lastIndex).trim();
       if (afterTable) {
         parts.push({ type: 'markdown', content: afterTable });
       }
     }
     
     return (
-      <div>
+      <div className="space-y-4">
+        {mindmapBlock && (
+          <MindMap lines={mindmapBlock.split('\n')} />
+        )}
         {parts.map((part, index) => {
           if (part.type === 'table') {
             return <TableRenderer key={index} content={part.content} />;
@@ -110,7 +244,7 @@ const renderContentWithTables = (content: string) => {
             return (
               <ReactMarkdown
                 key={index}
-                remarkPlugins={[remarkMath]}
+                remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}
                 components={customComponents}
               >
@@ -124,13 +258,18 @@ const renderContentWithTables = (content: string) => {
   } else {
     // 如果没有表格，直接使用ReactMarkdown
     return (
-      <ReactMarkdown
-        remarkPlugins={[remarkMath]}
+      <div className="space-y-4">
+        {mindmapBlock && (
+          <MindMap lines={mindmapBlock.split('\n')} />
+        )}
+        <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={customComponents}
       >
-        {content}
+        {contentForRender}
       </ReactMarkdown>
+      </div>
     );
   }
 };
@@ -160,6 +299,16 @@ export default function ExplainStep({
   const [userAnswer, setUserAnswer] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  const hasTriggeredGenerationRef = useRef(false);
+
+  const isContentReady = (c: string) => {
+    const t = (c || '').trim();
+    if (!t) return false;
+    // 通过长度和结构标记判断内容是否已完整（避免流式早期片段触发）
+    const longEnough = t.length > 200;
+    const hasStructure = /##\s|\*\*|\n\|.*\|/.test(t);
+    return longEnough || hasStructure;
+  };
 
   // 动态生成AI讲解prompt的方法
   const generateDynamicPrompt = (topic?: string, subject?: string, curriculumInfo?: string) => {
@@ -641,12 +790,14 @@ ${curriculumInfo}
     }
   };
 
-  // 组件挂载时生成AI讲解
+  // 当学习内容就绪且尚未有AI讲解时再触发生成，避免抢在流式内容未完成前
   useEffect(() => {
-    if (!initialAiExplanation) {
+    if (hasTriggeredGenerationRef.current) return;
+    if (!initialAiExplanation && !aiExplanation && isContentReady(content)) {
+      hasTriggeredGenerationRef.current = true;
       generateAIExplanation();
     }
-  }, []);
+  }, [content, initialAiExplanation, aiExplanation]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 relative">
@@ -750,7 +901,7 @@ ${curriculumInfo}
               </div>
             ) : aiExplanation ? (
               <div className="bg-white rounded-2xl p-8 shadow-lg border border-blue-200">
-                <div className="prose prose-blue max-w-none prose-lg">
+                <div className="markdown-body">
                   {renderContentWithTables(aiExplanation)}
                 </div>
               </div>

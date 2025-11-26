@@ -1,6 +1,10 @@
 'use client'
 
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
 import { ConversationHistory } from '../types/conversation';
 import { ChatMessage, Role } from '../utils/chatTypes';
 import { ConversationService } from '../services/conversationService';
@@ -68,8 +72,8 @@ export default function ConversationView({
                 if (updatedConversation) {
                   onConversationUpdate(updatedConversation);
                   
-                  // 自动生成标题：当消息数量达到4条且标题是默认标题时
-                  if (currentMessages.length >= 4 && 
+                  // 自动生成标题：当消息数量达到1条且标题是默认标题时
+                  if (currentMessages.length >= 1 && 
                       (updatedConversation.title.includes('对话') || 
                        updatedConversation.title === '新对话' ||
                        updatedConversation.title.includes(new Date().toLocaleString('zh-CN')))) {
@@ -213,7 +217,7 @@ export default function ConversationView({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
-          <div>
+          <div className="flex items-center gap-3">
             <h1 className="text-lg font-semibold text-gray-900">{conversation.title}</h1>
             <div className="flex items-center space-x-2 text-sm text-gray-500">
               <span
@@ -230,6 +234,14 @@ export default function ConversationView({
               <span>•</span>
               <span>{conversation.lastActivity.toLocaleDateString('zh-CN')}</span>
             </div>
+            {conversation.type === 'learning' && (
+              <a
+                href={`/learning-interface?conversationId=${conversation.id}${conversation.subject ? `&subject=${encodeURIComponent(conversation.subject)}` : ''}${conversation.topic ? `&topic=${encodeURIComponent(conversation.topic)}` : ''}`}
+                className="ml-3 inline-flex items-center px-2 py-1 rounded-md border border-blue-200 text-blue-700 hover:bg-blue-50 text-xs"
+              >
+                进入系统学习
+              </a>
+            )}
           </div>
         </div>
       </div>
@@ -253,8 +265,10 @@ export default function ConversationView({
                     : 'bg-gray-100 text-gray-900'
                 }`}
               >
-                <div className="whitespace-pre-wrap break-words">
-                  {message.content}
+                <div className="markdown-body break-words">
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                    {message.content}
+                  </ReactMarkdown>
                 </div>
                 <div
                   className={`text-xs mt-1 ${

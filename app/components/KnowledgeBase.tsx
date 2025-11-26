@@ -594,7 +594,7 @@ const KnowledgeBase: React.FC<{ onItemsChange?: (items: KBItem[]) => void; hideP
         onDragLeave={onDragLeave}
         className={`border-2 border-dashed rounded-md p-6 text-center transition-all ${dragOver ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'border-slate-300 bg-slate-100/50 dark:border-slate-700 dark:bg-slate-800/50'}`}
       >
-        拖拽文件到此处，或点击"选择文件"上传
+        拖拽文件到此处，或点击“选择文件”上传
       </div>
 
       <div className="mt-4">

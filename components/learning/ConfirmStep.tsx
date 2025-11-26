@@ -67,8 +67,8 @@ export default function ConfirmStep({
           {/* 提示文字 */}
           <div className="mt-4 text-sm text-gray-600 text-center">
             <p>
-              如果你已经理解了上述知识点，可以点击"我已理解"进入测验环节。
-              如果还有疑问，可以点击"需要继续讲解"返回详细讲解。
+              如果你已经理解了上述知识点，可以点击“我已理解”进入测验环节。
+              如果还有疑问，可以点击“需要继续讲解”返回详细讲解。
             </p>
           </div>
         </div>

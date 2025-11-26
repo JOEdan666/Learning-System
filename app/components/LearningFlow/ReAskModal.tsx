@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createProviderFromEnv } from '../../services/ai';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
@@ -114,7 +115,7 @@ export default function ReAskModal({ isOpen, onClose, subject, topic, originalCo
               return (
                 <ReactMarkdown
                   key={index}
-                  remarkPlugins={[remarkMath]}
+                  remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
                   components={components}
                 >
@@ -129,7 +130,7 @@ export default function ReAskModal({ isOpen, onClose, subject, topic, originalCo
       // 如果没有表格，使用ReactMarkdown渲染整个内容
       return (
         <ReactMarkdown
-          remarkPlugins={[remarkMath]}
+          remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
           components={components}
         >
@@ -326,7 +327,7 @@ ${originalContent}
             </button>
           </form>
           <p className="text-xs text-gray-500 mt-2">
-            💡 提示：你可以问"这个概念我还是不太懂"、"能举个例子吗"等问题
+            💡 提示：你可以问“这个概念我还是不太懂”、“能举个例子吗”等问题
           </p>
         </div>
       </div>

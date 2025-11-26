@@ -13,6 +13,14 @@ import { LearningState } from '../types/learning';
 import { CurriculumService } from '../services/curriculumService';
 import RegionalCurriculumSelector from '../components/RegionalCurriculumSelector';
 
+const STEP_FLOW: Array<{ key: LearningState; label: string; desc: string }> = [
+  { key: 'EXPLAIN', label: '讲解', desc: 'AI 讲解核心知识' },
+  { key: 'CONFIRM', label: '确认', desc: '检查理解程度' },
+  { key: 'QUIZ', label: '测验', desc: '练习巩固所学' },
+  { key: 'RESULT', label: '结果', desc: '回顾得分与分析' },
+  { key: 'REVIEW', label: '复盘', desc: '行动计划与总结' },
+];
+
 // 动态导入组件以避免SSR问题
 const ExplainStep = dynamic(() => import('../components/LearningFlow/ExplainStep'), { ssr: false });
 const ConfirmStep = dynamic(() => import('../components/LearningFlow/ConfirmStep'), { ssr: false });
@@ -56,6 +64,7 @@ function LearningInterfaceContent() {
     answer: string;
     feedback?: string;
   }>>([]);
+  const currentStepIndex = STEP_FLOW.findIndex(s => s.key === currentStep);
   
   const conversationService = ConversationService.getInstance();
 
@@ -76,6 +85,8 @@ function LearningInterfaceContent() {
   useEffect(() => {
     if (subject && topic) {
       initializeLearningSession();
+    } else {
+      setIsLoading(false);
     }
   }, [subject, topic]);
 
@@ -183,24 +194,14 @@ function LearningInterfaceContent() {
                  }
                  
                  // 恢复练习题结果
-                 if (learningProgress.quizQuestions && learningProgress.userAnswers) {
-                   const quizResultsData = learningProgress.quizQuestions.map(question => {
-                     const userAnswer = learningProgress.userAnswers?.find(
-                       answer => answer.questionId === question.id
-                     );
-                     return {
-                       question: question.question,
-                       options: question.options || [],
-                       correctAnswer: question.correctAnswer,
-                       userAnswer: userAnswer?.userAnswer || '',
-                       isCorrect: userAnswer?.isCorrect || false,
-                       explanation: question.explanation || '',
-                       score: userAnswer?.score || 0,
-                       timeSpent: userAnswer?.timeSpent || 0
-                     };
-                   });
-                   setQuizResults(quizResultsData);
-                 }
+                if (learningProgress.quizQuestions && learningProgress.userAnswers) {
+                  const answersArr = learningProgress.userAnswers.map(ans => ans.userAnswer || '');
+                  setQuizResults({
+                    questions: learningProgress.quizQuestions,
+                    answers: answersArr,
+                    score: learningProgress.finalScore ?? stats?.totalScore ?? 0,
+                  });
+                }
                  
                  // 恢复其他学习数据
                  if (learningProgress.finalScore !== undefined) {
@@ -253,14 +254,9 @@ function LearningInterfaceContent() {
   const generateLearningContent = async () => {
     try {
       setIsLoading(true);
-      
-      // 使用AI生成个性化学习内容
       const { createProviderFromEnv } = await import('../services/ai');
       const aiProvider = createProviderFromEnv();
-      
-      if (!aiProvider) {
-        throw new Error('AI服务不可用');
-      }
+      if (!aiProvider) throw new Error('AI服务不可用');
 
       // 获取教学大纲指导
       const curriculumService = CurriculumService.getInstance();
@@ -355,49 +351,48 @@ function LearningInterfaceContent() {
 
 请开始你的专业讲解：`;
 
-      // 使用Promise包装AI调用
+      // 流式获取AI内容，首段即显示，加速体感
       const content = await new Promise<string>((resolve, reject) => {
         let fullResponse = '';
-        
+        let gotFirstChunk = false;
         aiProvider.onMessage((message: string, isFinal: boolean) => {
           fullResponse += message;
+          if (!gotFirstChunk && fullResponse.trim()) {
+            setLearningContent(fullResponse);
+            gotFirstChunk = true;
+            setIsLoading(false);
+          }
           if (isFinal) {
             resolve(fullResponse);
+          } else {
+            setLearningContent(fullResponse);
           }
         });
-        
-        aiProvider.onError((error: string) => {
-          reject(new Error(error));
-        });
-        
+        aiProvider.onError((error: string) => reject(new Error(error)));
         aiProvider.sendMessage(prompt);
       });
 
-      if (content && content.trim()) {
-        setLearningContent(content);
-        setAiExplanation(content);
-        toast.success('AI学习内容生成成功！');
-        
-        // 自动保存生成的AI学习内容
-         if (conversationId) {
-           try {
-             await LearningProgressClient.saveLearningProgress({
-               conversationId,
-               subject,
-               topic,
-               aiExplanation: content,
-               socraticDialogue: socraticDialogue,
-               currentStep: 'EXPLAIN'
-             });
-             console.log('AI学习内容已自动保存');
-           } catch (error) {
-             console.error('自动保存AI学习内容失败:', error);
-           }
-         }
-      } else {
-        throw new Error('AI返回空内容');
+      if (!content || !content.trim()) throw new Error('AI返回空内容');
+
+      setLearningContent(content);
+      setAiExplanation(content);
+      toast.success('AI学习内容生成成功！');
+
+      if (conversationId) {
+        try {
+          await LearningProgressClient.saveLearningProgress({
+            conversationId,
+            subject,
+            topic,
+            aiExplanation: content,
+            socraticDialogue: socraticDialogue,
+            currentStep: 'EXPLAIN'
+          });
+          console.log('AI学习内容已自动保存');
+        } catch (error) {
+          console.error('自动保存AI学习内容失败:', error);
+        }
       }
-      
     } catch (error) {
       console.error('生成AI学习内容失败:', error);
       toast.error('生成学习内容失败，请稍后重试');
@@ -509,9 +504,48 @@ function LearningInterfaceContent() {
   // 处理测验完成
   const handleQuizComplete = async (results: any) => {
     console.log('测验完成，结果:', results);
-    setQuizResults(results);
+    const normalized = {
+      answers: results.answers || [],
+      questions: results.questions || [],
+      score: results.score || 0,
+    };
+    setQuizResults(normalized);
     setCurrentStep('RESULT');
     toast.success('测验完成，查看结果');
+
+    // 保存测验数据
+    if (conversationId) {
+      try {
+        const userAnswers = normalized.questions.map((q: any, idx: number) => {
+          const ua = normalized.answers[idx] || '';
+          const isCorrect = ua === q.correctAnswer;
+          return {
+            questionId: q.id ?? idx,
+            userAnswer: ua,
+            isCorrect,
+            score: isCorrect ? (q.points || 10) : 0,
+          };
+        });
+        await LearningProgressClient.saveLearningProgress({
+          conversationId,
+          subject,
+          topic,
+          aiExplanation,
+          socraticDialogue,
+          currentStep: 'RESULT',
+          quizQuestions: normalized.questions,
+          userAnswers,
+          finalScore: normalized.score,
+          stats: {
+            accuracy: normalized.score,
+            totalQuestions: normalized.questions.length,
+            correctAnswers: userAnswers.filter(a => a.isCorrect).length,
+          },
+        });
+      } catch (error) {
+        console.error('保存测验数据失败:', error);
+      }
+    }
   };
 
   // 处理结果查看完成
@@ -525,7 +559,39 @@ function LearningInterfaceContent() {
   const handleReviewComplete = async () => {
     console.log('复习完成');
     toast.success('学习完成！恭喜你完成了整个学习流程！');
-    // 可以跳转到其他页面或重新开始
+    if (conversationId && quizResults) {
+      try {
+        const userAnswers = quizResults.questions.map((q: any, idx: number) => {
+          const ua = quizResults.answers?.[idx] || '';
+          const isCorrect = ua === q.correctAnswer;
+          return {
+            questionId: q.id ?? idx,
+            userAnswer: ua,
+            isCorrect,
+            score: isCorrect ? (q.points || 10) : 0,
+          };
+        });
+        await LearningProgressClient.saveLearningProgress({
+          conversationId,
+          subject,
+          topic,
+          aiExplanation,
+          socraticDialogue,
+          currentStep: 'DONE',
+          isCompleted: true,
+          quizQuestions: quizResults.questions,
+          userAnswers,
+          finalScore: quizResults.score,
+          stats: {
+            accuracy: quizResults.score,
+            totalQuestions: quizResults.questions.length,
+            correctAnswers: userAnswers.filter(a => a.isCorrect).length,
+          },
+        });
+      } catch (error) {
+        console.error('保存复习数据失败:', error);
+      }
+    }
   };
 
   const handleManualSave = async () => {
@@ -544,7 +610,21 @@ function LearningInterfaceContent() {
          aiExplanation,
          socraticDialogue,
          currentStep,
-         aiSummary // 包含AI总结
+         aiSummary, // 包含AI总结
+         quizQuestions: quizResults?.questions,
+         userAnswers: quizResults
+          ? quizResults.questions.map((q: any, idx: number) => {
+              const ua = quizResults.answers?.[idx] || '';
+              const isCorrect = ua === q.correctAnswer;
+              return {
+                questionId: q.id ?? idx,
+                userAnswer: ua,
+                isCorrect,
+                score: isCorrect ? (q.points || 10) : 0,
+              };
+            })
+          : undefined,
+         finalScore: quizResults?.score,
        });
        
        setHasManualSave(true);
@@ -570,141 +650,128 @@ function LearningInterfaceContent() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 relative">
-      {/* 动态背景效果 */}
-      <div className="absolute inset-0 opacity-20">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-300 rounded-full mix-blend-multiply filter blur-xl animate-pulse"></div>
-        <div className="absolute top-3/4 right-1/4 w-96 h-96 bg-indigo-300 rounded-full mix-blend-multiply filter blur-xl animate-pulse delay-1000"></div>
-        <div className="absolute bottom-1/4 left-1/2 w-96 h-96 bg-cyan-300 rounded-full mix-blend-multiply filter blur-xl animate-pulse delay-2000"></div>
+  if (!subject || !topic) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex items-center justify-center">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow p-6 max-w-md text-center">
+          <h2 className="text-xl font-semibold mb-2">请选择学习内容</h2>
+          <p className="text-sm text-slate-600 mb-4">进入系统化学习前，请先选择学科与主题。</p>
+          <button onClick={() => window.location.href = '/learning-setup'} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold shadow-sm hover:bg-blue-700">去选择内容</button>
+        </div>
       </div>
-
+    )
+  }
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
       {/* 顶部导航栏 */}
-      <div className="relative z-10 backdrop-blur-sm bg-white/80 border-b border-blue-200/50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Link href="/" className="flex items-center space-x-2 text-blue-700 hover:text-blue-900 transition-colors">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-                <span className="font-medium">返回首页</span>
-              </Link>
-              
-              <div className="flex items-center space-x-3">
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-blue-700 to-blue-900 bg-clip-text text-transparent">
-                  {subject} - {topic}
-                </h1>
-              </div>
+      <div className="sticky top-0 z-20 bg-white/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-200 dark:border-slate-800">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/" className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">←</span>
+              返回首页
+            </Link>
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold">{subject || '未选择学科'} · {topic || '未选择主题'}</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{selectedRegion} · {grade || '年级未设定'}</span>
             </div>
-            
-            <div className="flex items-center space-x-3">
-              <div className="px-4 py-2 bg-gradient-to-r from-blue-100 to-indigo-100 backdrop-blur-sm border border-blue-300 rounded-full shadow-sm">
-                <span className="text-blue-700 text-sm font-medium flex items-center">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
-                  系统化学习
-                </span>
-              </div>
-              <div className="px-4 py-2 bg-gradient-to-r from-green-100 to-emerald-100 backdrop-blur-sm border border-green-300 rounded-full shadow-sm">
-                <span className="text-green-700 text-sm font-medium flex items-center">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-                  {isRestoredSession ? '恢复会话' : '讲解阶段'}
-                </span>
-              </div>
-              <div className="px-4 py-2 bg-gradient-to-r from-purple-100 to-pink-100 backdrop-blur-sm border border-purple-300 rounded-full shadow-sm">
-                <span className="text-purple-700 text-sm font-medium flex items-center">
-                  <div className="w-2 h-2 bg-purple-500 rounded-full mr-2 animate-pulse"></div>
-                  {selectedRegion}考纲
-                </span>
-              </div>
-              
-              {/* 重新生成按钮 */}
+          </div>
+          <div className="flex items-center gap-2">
+            {aiSummary && (
               <button
-                onClick={async () => {
-                  setIsLoading(true);
-                  try {
-                    await generateLearningContent();
-                    toast.success('AI讲解内容已重新生成');
-                  } catch (error) {
-                    console.error('重新生成失败:', error);
-                    toast.error('重新生成失败，请稍后重试');
-                  }
-                }}
-                className="px-4 py-2 bg-gradient-to-r from-orange-400 to-red-400 text-white rounded-lg hover:from-orange-500 hover:to-red-500 transition-all duration-200 flex items-center space-x-2 shadow-md border border-orange-300"
+                onClick={() => setShowSummaryModal(true)}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                <span>重新生成</span>
+                查看总结
               </button>
-
-              {/* 手动保存按钮 */}
-              <button
-                onClick={handleManualSave}
-                disabled={isSaving}
-                className="px-4 py-2 bg-gradient-to-r from-green-400 to-emerald-400 text-white rounded-lg hover:from-green-500 hover:to-emerald-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2 shadow-md border border-green-300"
-              >
-                {isSaving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>保存中...</span>
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                    </svg>
-                    <span>保存进度</span>
-                  </>
-                )}
-              </button>
-
-              {/* 调试信息 */}
-              {process.env.NODE_ENV === 'development' && (
-                <div className="text-xs text-gray-500 bg-gray-100 p-2 rounded">
-                  aiSummary状态: {aiSummary ? `有内容(${aiSummary.length}字符)` : '无内容'}
-                </div>
-              )}
-
-              {/* 学习总结按钮 */}
-              {aiSummary && (
-                <button
-                  onClick={() => setShowSummaryModal(true)}
-                  className="px-4 py-2 bg-gradient-to-r from-purple-400 to-indigo-400 text-white rounded-lg hover:from-purple-500 hover:to-indigo-500 transition-all duration-200 flex items-center space-x-2 shadow-md border border-purple-300"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span>上一次课程总结</span>
-                </button>
-              )}
-            </div>
+            )}
+            <button
+              onClick={async () => {
+                setIsLoading(true);
+                try {
+                  await generateLearningContent();
+                  toast.success('AI讲解内容已重新生成');
+                } catch (error) {
+                  console.error('重新生成失败:', error);
+                  toast.error('重新生成失败，请稍后重试');
+                }
+              }}
+              className="px-3 py-2 rounded-lg bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 shadow-sm"
+            >
+              重新生成
+            </button>
+            <button
+              onClick={handleManualSave}
+              disabled={isSaving}
+              className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 shadow-sm disabled:opacity-60"
+            >
+              {isSaving ? '保存中...' : '保存进度'}
+            </button>
           </div>
         </div>
       </div>
 
       {/* 主要内容区域 */}
-      <div className="relative z-10 max-w-7xl mx-auto px-6 py-8">
-        {/* 装饰性顶部边框 */}
-        <div className="h-1 bg-gradient-to-r from-blue-400 via-indigo-500 to-cyan-400 rounded-full mb-8 shadow-lg"></div>
-        
+      <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        {/* 概览卡 */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-5 flex flex-wrap gap-4 items-center justify-between">
+          <div className="space-y-1">
+            <p className="text-xs text-blue-600 font-semibold uppercase tracking-wide">系统化学习</p>
+            <h1 className="text-2xl font-bold">专注当前主题 · 提升效率</h1>
+            <p className="text-sm text-slate-600 dark:text-slate-300">AI 讲解 → 理解确认 → 测验 → 结果 → 复盘，全程自动记录。</p>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800">
+              <div className="text-xs text-slate-500">当前阶段</div>
+              <div className="font-semibold">{STEP_FLOW.find(s => s.key === currentStep)?.label || '讲解'}</div>
+            </div>
+            <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800">
+              <div className="text-xs text-slate-500">进度保存</div>
+              <div className="font-semibold">{hasManualSave ? '已手动保存' : '自动保存中'}</div>
+            </div>
+            <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800">
+              <div className="text-xs text-slate-500">会话状态</div>
+              <div className="font-semibold">{isRestoredSession ? '已恢复' : '新会话'}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* 流程步骤指示 */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-4 flex flex-wrap gap-3">
+          {STEP_FLOW.map((step, idx) => {
+            const active = currentStepIndex === idx;
+            const done = currentStepIndex > idx;
+            return (
+              <div
+                key={step.key}
+                className={`flex-1 min-w-[140px] px-3 py-2 rounded-xl border text-sm ${active ? 'border-blue-500 bg-blue-50 text-blue-700' : done ? 'border-green-200 bg-green-50 text-green-700' : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}
+              >
+                <div className="font-semibold flex items-center gap-2">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold border border-current">
+                    {idx + 1}
+                  </span>
+                  {step.label}
+                </div>
+                <div className="text-xs mt-1">{step.desc}</div>
+              </div>
+            );
+          })}
+        </div>
+
         {/* 考纲选择器 */}
-        <div className="mb-6">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-4">
           <RegionalCurriculumSelector
             selectedRegion={selectedRegion}
             selectedCurriculum={selectedCurriculum}
             onCurriculumSelect={(region, curriculum) => {
               setSelectedRegion(region);
               setSelectedCurriculum(curriculum);
-              // 当考纲改变时，提示用户重新生成内容
               if (learningContent) {
                 toast.success(`已选择${region} - ${curriculum}，点击重新生成获取对应内容`);
               }
             }}
             onRegionChange={(region) => {
               setSelectedRegion(region);
-              // 当地区改变时，重新生成学习内容
               if (region !== selectedRegion && learningContent) {
                 toast.success(`已切换到${region}考纲，点击重新生成获取对应内容`);
               }
@@ -715,9 +782,9 @@ function LearningInterfaceContent() {
           />
         </div>
 
-        {/* 玻璃效果卡片容器 */}
-        <div className="backdrop-blur-xl bg-white/80 border border-blue-200/50 rounded-3xl shadow-xl overflow-hidden">
-          <div className="p-8">
+        {/* 学习流程内容 */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg">
+          <div className="p-6 md:p-8">
             {currentStep === 'EXPLAIN' && (
               <ExplainStep 
                 content={learningContent}

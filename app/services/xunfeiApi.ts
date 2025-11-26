@@ -151,7 +151,6 @@ export class XunfeiApiService {
       
       // 尝试使用Node crypto
       try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
         const crypto = require('crypto');
         return crypto.createHmac('sha256', secret).update(message).digest('base64');
       } catch (e) {

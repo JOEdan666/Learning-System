@@ -39,8 +39,8 @@ export async function GET(request: NextRequest) {
     // 计算真实的测验成绩
     const totalQuestions = session.quizQuestions.length;
     const correctAnswers = session.userAnswers.filter(answer => answer.isCorrect).length;
-    const totalScore = session.userAnswers.reduce((sum, answer) => sum + answer.score, 0);
-    const maxPossibleScore = session.quizQuestions.reduce((sum, question) => sum + question.points, 0);
+    const totalScore = session.userAnswers.reduce((sum, answer) => sum + (typeof answer.score === 'number' ? answer.score : 0), 0);
+    const maxPossibleScore = session.quizQuestions.reduce((sum, question) => sum + (typeof question.points === 'number' ? question.points : 1), 0);
     const accuracy = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
 
     // 计算理解程度（基于正确率和答题时间）

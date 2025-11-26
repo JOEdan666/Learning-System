@@ -35,7 +35,7 @@ export class ConversationService {
   }
 
   // 获取所有对话历史
-  private getAllConversations(): ConversationHistory[] {
+  getAllConversations(): ConversationHistory[] {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (!stored) return [];

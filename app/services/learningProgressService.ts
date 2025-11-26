@@ -39,6 +39,20 @@ export interface UserAnswerData {
 }
 
 export class LearningProgressService {
+  // 规范化学习步骤枚举，统一为 EXPLAIN | COACH | QUIZ | REVIEW
+  private static normalizeStep(step?: string): 'EXPLAIN' | 'COACH' | 'QUIZ' | 'REVIEW' {
+    const s = (step || '').toUpperCase();
+    if (['EXPLAIN', 'COACH', 'QUIZ', 'REVIEW'].includes(s)) return s as any;
+    // 兼容旧值
+    const map: Record<string, 'EXPLAIN' | 'COACH' | 'QUIZ' | 'REVIEW'> = {
+      EXPLANATION: 'EXPLAIN',
+      SOCRATIC: 'COACH',
+      RESULT: 'REVIEW',
+      CONFIRM: 'EXPLAIN'
+    };
+    return map[s] || 'EXPLAIN';
+  }
+
   // 保存学习进度
   static async saveLearningProgress(data: LearningProgressData) {
     try {
@@ -51,14 +65,15 @@ export class LearningProgressService {
         return await prisma.learningSession.update({
           where: { conversationId: data.conversationId },
           data: {
-            subject: data.subject,
-            topic: data.topic,
+            // 防止将必填字段置为空字符串
+            subject: data.subject || existingSession.subject,
+            topic: data.topic || existingSession.topic,
             region: data.region || existingSession.region,
             grade: data.grade || existingSession.grade,
             aiExplanation: data.aiExplanation || existingSession.aiExplanation,
             socraticDialogue: data.socraticDialogue || existingSession.socraticDialogue,
             coachingHistory: data.coachingHistory || existingSession.coachingHistory,
-            currentStep: data.currentStep || existingSession.currentStep,
+            currentStep: LearningProgressService.normalizeStep(data.currentStep) || existingSession.currentStep,
             isCompleted: data.isCompleted ?? existingSession.isCompleted,
             finalScore: data.finalScore ?? existingSession.finalScore,
             feedback: data.feedback || existingSession.feedback,
@@ -79,7 +94,7 @@ export class LearningProgressService {
             aiExplanation: data.aiExplanation,
             socraticDialogue: data.socraticDialogue,
             coachingHistory: data.coachingHistory,
-            currentStep: data.currentStep || 'EXPLAIN',
+            currentStep: LearningProgressService.normalizeStep(data.currentStep) || 'EXPLAIN',
             isCompleted: data.isCompleted || false,
             finalScore: data.finalScore,
             feedback: data.feedback,
@@ -124,18 +139,25 @@ export class LearningProgressService {
   // 更新AI讲解内容
   static async updateAIExplanation(conversationId: string, aiExplanation: string) {
     try {
-      return await prisma.learningSession.upsert({
-        where: { conversationId },
-        update: {
-          aiExplanation,
-          updatedAt: new Date()
-        },
-        create: {
+      // 优先更新已存在会话；若不存在，创建占位但不写空字符串
+      const exists = await prisma.learningSession.findUnique({ where: { conversationId } });
+      if (exists) {
+        return await prisma.learningSession.update({
+          where: { conversationId },
+          data: {
+            aiExplanation,
+            currentStep: 'EXPLAIN',
+            updatedAt: new Date()
+          }
+        });
+      }
+      return await prisma.learningSession.create({
+        data: {
           conversationId,
-          subject: '',
-          topic: '',
+          subject: '未设置',
+          topic: '未设置',
           aiExplanation,
-          currentStep: 'explanation'
+          currentStep: 'EXPLAIN'
         }
       });
     } catch (error) {
@@ -147,19 +169,25 @@ export class LearningProgressService {
   // 更新苏格拉底对话内容
   static async updateSocraticDialogue(conversationId: string, socraticDialogue: any) {
     try {
-      return await prisma.learningSession.upsert({
-        where: { conversationId },
-        update: {
-          socraticDialogue,
-          currentStep: 'socratic',
-          updatedAt: new Date()
-        },
-        create: {
+      // 优先更新已存在会话；若不存在，创建占位但不写空字符串
+      const exists = await prisma.learningSession.findUnique({ where: { conversationId } });
+      if (exists) {
+        return await prisma.learningSession.update({
+          where: { conversationId },
+          data: {
+            socraticDialogue,
+            currentStep: 'COACH',
+            updatedAt: new Date()
+          }
+        });
+      }
+      return await prisma.learningSession.create({
+        data: {
           conversationId,
-          subject: '',
-          topic: '',
+          subject: '未设置',
+          topic: '未设置',
           socraticDialogue,
-          currentStep: 'socratic'
+          currentStep: 'COACH'
         }
       });
     } catch (error) {

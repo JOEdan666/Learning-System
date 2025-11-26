@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import ConversationList from '../components/ConversationList';
 import ConversationView from '../components/ConversationView';
 import { ConversationHistory, CreateConversationRequest } from '../types/conversation';
@@ -10,11 +11,20 @@ import { ChatMessage, Role } from '../utils/chatTypes';
 export default function ConversationsPage() {
   const [selectedConversation, setSelectedConversation] = useState<ConversationHistory | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const router = useRouter();
   
   const conversationService = ConversationService.getInstance();
 
   // 选择对话
   const handleSelectConversation = (conversation: ConversationHistory) => {
+    if (conversation.type === 'learning') {
+      const params = new URLSearchParams();
+      if (conversation.subject) params.set('subject', conversation.subject);
+      if (conversation.topic) params.set('topic', conversation.topic);
+      params.set('conversationId', conversation.id);
+      router.push(`/learning-interface?${params.toString()}`);
+      return;
+    }
     setSelectedConversation(conversation);
   };
 
