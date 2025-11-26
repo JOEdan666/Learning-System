@@ -21,6 +21,15 @@ build
 .next
 out
 
+# Large local assets (do not push)
+MVP产品视频/
+视频2/
+学习文件/
+*.mov
+*.mp4
+*.zip
+*.tar.gz
+
 # Misc
 .DS_Store
 .env
