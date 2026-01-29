@@ -7,23 +7,17 @@ import {
   CreateConversationRequest,
   UpdateConversationRequest,
   GenerateTitleRequest,
-  GenerateTitleResponse,
-  ConversationType
+  GenerateTitleResponse
 } from '../types/conversation';
 import { ChatMessage } from '../utils/chatTypes';
 import { createProviderFromEnv } from './ai';
 import type { AIProvider } from './ai';
-
-// 本地存储键名
-const STORAGE_KEY = 'conversation_history';
-const STORAGE_VERSION = '1.0';
 
 export class ConversationService {
   private static instance: ConversationService;
   private aiProvider: AIProvider | null = null;
   
   private constructor() {
-    // 初始化AI Provider
     this.aiProvider = createProviderFromEnv();
   }
   
@@ -34,284 +28,186 @@ export class ConversationService {
     return ConversationService.instance;
   }
 
-  // 获取所有对话历史
-  getAllConversations(): ConversationHistory[] {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (!stored) return [];
-      
-      const data = JSON.parse(stored);
-      if (data.version !== STORAGE_VERSION) {
-        // 版本不匹配，清空数据
-        localStorage.removeItem(STORAGE_KEY);
-        return [];
-      }
-      
-      return data.conversations.map((conv: any) => ({
-        ...conv,
-        createdAt: new Date(conv.createdAt),
-        updatedAt: new Date(conv.updatedAt),
-        lastActivity: new Date(conv.lastActivity),
-        learningSession: conv.learningSession ? {
-          ...conv.learningSession,
-          createdAt: new Date(conv.learningSession.createdAt),
-          updatedAt: new Date(conv.learningSession.updatedAt)
-        } : undefined
-      }));
-    } catch (error) {
-      console.error('获取对话历史失败:', error);
-      return [];
-    }
-  }
-
-  // 保存所有对话历史
-  private saveAllConversations(conversations: ConversationHistory[]): void {
-    try {
-      const data = {
-        version: STORAGE_VERSION,
-        conversations: conversations
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (error) {
-      console.error('保存对话历史失败:', error);
-    }
-  }
-
-  // 查找现有的学习对话（不创建新的）
-  findExistingLearningConversation(subject: string, topic: string): ConversationHistory | null {
-    const conversations = this.getAllConversations();
-    return conversations.find(conv => 
-      conv.type === 'learning' && 
-      conv.subject === subject && 
-      conv.topic === topic &&
-      !conv.isArchived
-    ) || null;
-  }
-
-  // 查找或创建学习对话（避免重复创建相同主题的对话）
-  async findOrCreateLearningConversation(request: CreateConversationRequest): Promise<ConversationHistory> {
-    if (request.type === 'learning' && request.subject && request.topic) {
-      // 查找是否已存在相同主题的学习对话
-      const conversations = this.getAllConversations();
-      const existingConversation = conversations.find(conv => 
-        conv.type === 'learning' && 
-        conv.subject === request.subject && 
-        conv.topic === request.topic &&
-        !conv.isArchived
-      );
-
-      if (existingConversation) {
-        // 更新现有对话的最后活动时间和AI讲解内容
-        const now = new Date();
-        existingConversation.lastActivity = now;
-        existingConversation.updatedAt = now;
-        if (request.aiExplanation) {
-          existingConversation.aiExplanation = request.aiExplanation;
-        }
-        
-        // 如果有初始消息，添加到对话中
-        if (request.initialMessage) {
-          existingConversation.messages.push(request.initialMessage);
-          existingConversation.messageCount = existingConversation.messages.length;
-        }
-
-        // 移动到列表顶部
-        const index = conversations.findIndex(conv => conv.id === existingConversation.id);
-        if (index > 0) {
-          conversations.splice(index, 1);
-          conversations.unshift(existingConversation);
-        }
-
-        this.saveAllConversations(conversations);
-        return existingConversation;
-      }
-    }
-
-    // 如果不是学习对话或没有找到现有对话，创建新对话
-    return this.createConversation(request);
-  }
-
-  // 创建新对话
-  async createConversation(request: CreateConversationRequest): Promise<ConversationHistory> {
-    const now = new Date();
-    const conversation: ConversationHistory = {
-      id: `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      title: request.title || await this.generateDefaultTitle(request),
-      type: request.type,
-      messages: request.initialMessage ? [request.initialMessage] : [],
-      createdAt: now,
-      updatedAt: now,
-      lastActivity: now,
-      messageCount: request.initialMessage ? 1 : 0,
-      learningSession: request.learningSession,
-      subject: request.subject,
-      topic: request.topic,
-      aiExplanation: request.aiExplanation,
-      isArchived: false,
-      tags: []
-    };
-
-    const conversations = this.getAllConversations();
-    conversations.unshift(conversation); // 新对话放在最前面
-    this.saveAllConversations(conversations);
-
-    return conversation;
-  }
-
-  // 更新对话
-  async updateConversation(id: string, request: UpdateConversationRequest): Promise<ConversationHistory | null> {
-    const conversations = this.getAllConversations();
-    const index = conversations.findIndex(conv => conv.id === id);
-    
-    if (index === -1) return null;
-
-    const conversation = conversations[index];
-    const now = new Date();
-
-    // 更新字段
-    if (request.title !== undefined) conversation.title = request.title;
-    if (request.messages !== undefined) {
-      conversation.messages = request.messages;
-      conversation.messageCount = request.messages.length;
-    }
-    if (request.isArchived !== undefined) conversation.isArchived = request.isArchived;
-    if (request.tags !== undefined) conversation.tags = request.tags;
-    if (request.aiExplanation !== undefined) conversation.aiExplanation = request.aiExplanation;
-
-    conversation.updatedAt = now;
-    conversation.lastActivity = now;
-
-    this.saveAllConversations(conversations);
-    return conversation;
-  }
-
-  // 添加消息到对话
-  async addMessage(conversationId: string, message: ChatMessage): Promise<ConversationHistory | null> {
-    const conversations = this.getAllConversations();
-    const index = conversations.findIndex(conv => conv.id === conversationId);
-    
-    if (index === -1) return null;
-
-    const conversation = conversations[index];
-    
-    // 防止重复添加相同的消息（简单的去重逻辑）
-    const lastMessage = conversation.messages[conversation.messages.length - 1];
-    if (lastMessage && 
-        lastMessage.role === message.role && 
-        lastMessage.content === message.content) {
-      console.log('检测到重复消息，跳过添加');
-      return conversation;
-    }
-
-    conversation.messages.push(message);
-    conversation.messageCount = conversation.messages.length;
-    conversation.updatedAt = new Date();
-    conversation.lastActivity = new Date();
-
-    // 移动到列表顶部
-    conversations.splice(index, 1);
-    conversations.unshift(conversation);
-
-    this.saveAllConversations(conversations);
-    return conversation;
-  }
-
   // 获取对话列表
   async getConversations(query: ConversationListQuery = {}): Promise<ConversationListResponse> {
-    const {
-      page = 1,
-      limit = 20,
-      type,
-      search,
-      sortBy = 'lastActivity',
-      sortOrder = 'desc'
-    } = query;
+    try {
+      const params = new URLSearchParams();
+      if (query.page) params.append('page', query.page.toString());
+      if (query.limit) params.append('limit', query.limit.toString());
+      if (query.type) params.append('type', query.type);
+      if (query.search) params.append('search', query.search);
+      if (query.sortBy) params.append('sortBy', query.sortBy);
+      if (query.sortOrder) params.append('sortOrder', query.sortOrder);
 
-    let conversations = this.getAllConversations();
-
-    // 过滤
-    if (type) {
-      conversations = conversations.filter(conv => conv.type === type);
-    }
-
-    if (search) {
-      const searchLower = search.toLowerCase();
-      conversations = conversations.filter(conv => 
-        conv.title.toLowerCase().includes(searchLower) ||
-        conv.subject?.toLowerCase().includes(searchLower) ||
-        conv.topic?.toLowerCase().includes(searchLower) ||
-        conv.messages.some(msg => msg.content.toLowerCase().includes(searchLower))
-      );
-    }
-
-    // 排序
-    conversations.sort((a, b) => {
-      const aValue = a[sortBy];
-      const bValue = b[sortBy];
-      
-      if (aValue instanceof Date && bValue instanceof Date) {
-        return sortOrder === 'desc' ? bValue.getTime() - aValue.getTime() : aValue.getTime() - bValue.getTime();
+      const response = await fetch(`/api/conversations?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error('获取对话列表失败');
       }
-      
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortOrder === 'desc' ? bValue.localeCompare(aValue) : aValue.localeCompare(bValue);
-      }
-      
-      return 0;
-    });
-
-    // 分页
-    const total = conversations.length;
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedConversations = conversations.slice(startIndex, endIndex);
-
-    return {
-      conversations: paginatedConversations,
-      total,
-      page,
-      limit,
-      hasMore: endIndex < total
-    };
+      return await response.json();
+    } catch (error) {
+      console.error('获取对话列表失败:', error);
+      return {
+        conversations: [],
+        total: 0,
+        page: 1,
+        limit: 20,
+        hasMore: false
+      };
+    }
   }
 
   // 获取单个对话
   async getConversation(id: string): Promise<ConversationHistory | null> {
-    const conversations = this.getAllConversations();
-    return conversations.find(conv => conv.id === id) || null;
+    try {
+      const response = await fetch(`/api/conversations/${id}`);
+      if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error('获取对话详情失败');
+      }
+      const data = await response.json();
+      return {
+        ...data,
+        createdAt: new Date(data.createdAt),
+        updatedAt: new Date(data.updatedAt),
+        lastActivity: new Date(data.lastActivity),
+        learningSession: data.learningSession ? {
+          ...data.learningSession,
+          createdAt: new Date(data.learningSession.createdAt),
+          updatedAt: new Date(data.learningSession.updatedAt)
+        } : undefined
+      };
+    } catch (error) {
+      console.error('获取对话详情失败:', error);
+      return null;
+    }
+  }
+
+  // 创建新对话
+  async createConversation(request: CreateConversationRequest): Promise<ConversationHistory> {
+    try {
+      // 如果没有标题，先生成默认标题
+      if (!request.title) {
+        request.title = await this.generateDefaultTitle(request);
+      }
+
+      const response = await fetch('/api/conversations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        throw new Error('创建对话失败');
+      }
+
+      const data = await response.json();
+      return {
+        ...data,
+        createdAt: new Date(data.createdAt),
+        updatedAt: new Date(data.updatedAt),
+        lastActivity: new Date(data.lastActivity),
+        learningSession: data.learningSession ? {
+          ...data.learningSession,
+          createdAt: new Date(data.learningSession.createdAt),
+          updatedAt: new Date(data.learningSession.updatedAt)
+        } : undefined
+      };
+    } catch (error) {
+      console.error('创建对话失败:', error);
+      throw error;
+    }
+  }
+
+  // 更新对话
+  async updateConversation(id: string, request: UpdateConversationRequest): Promise<ConversationHistory | null> {
+    try {
+      const response = await fetch(`/api/conversations/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        throw new Error('更新对话失败');
+      }
+
+      const data = await response.json();
+      return {
+        ...data,
+        createdAt: new Date(data.createdAt),
+        updatedAt: new Date(data.updatedAt),
+        lastActivity: new Date(data.lastActivity),
+        learningSession: data.learningSession ? {
+          ...data.learningSession,
+          createdAt: new Date(data.learningSession.createdAt),
+          updatedAt: new Date(data.learningSession.updatedAt)
+        } : undefined
+      };
+    } catch (error) {
+      console.error('更新对话失败:', error);
+      return null;
+    }
   }
 
   // 删除对话
   async deleteConversation(id: string): Promise<boolean> {
-    const conversations = this.getAllConversations();
-    const index = conversations.findIndex(conv => conv.id === id);
-    
-    if (index === -1) return false;
-
-    conversations.splice(index, 1);
-    this.saveAllConversations(conversations);
-    return true;
+    try {
+      const response = await fetch(`/api/conversations/${id}`, {
+        method: 'DELETE',
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('删除对话失败:', error);
+      return false;
+    }
   }
 
-  // 生成对话标题
+  // 添加消息到对话
+  async addMessage(conversationId: string, message: ChatMessage): Promise<ConversationHistory | null> {
+    try {
+      // 获取当前对话最新状态
+      const current = await this.getConversation(conversationId);
+      if (!current) return null;
+
+      // 防止重复消息
+      const lastMessage = current.messages[current.messages.length - 1];
+      if (lastMessage && 
+          lastMessage.role === message.role && 
+          lastMessage.content === message.content) {
+        return current;
+      }
+
+      const messages = [...current.messages, message];
+      
+      return await this.updateConversation(conversationId, {
+        messages
+      });
+    } catch (error) {
+      console.error('添加消息失败:', error);
+      return null;
+    }
+  }
+
+  // 生成对话标题 (保持原逻辑，因为这是调用 AI 服务，不涉及数据库)
   async generateTitle(request: GenerateTitleRequest): Promise<GenerateTitleResponse> {
     try {
       if (request.type === 'learning' && request.subject && request.topic) {
-        // 系统化学习对话直接基于主题生成标题
         return {
           title: `${request.subject} - ${request.topic}`,
           confidence: 1.0
         };
       }
 
-      // 普通对话使用AI生成标题
-      // 使用独立的 Provider 实例，避免与主 Provider 冲突
       const tempProvider = createProviderFromEnv();
       if (!tempProvider) {
         throw new Error('AI Provider 未初始化');
       }
 
-      const recentMessages = request.messages.slice(-6); // 取最近6条消息
+      const recentMessages = request.messages.slice(-6);
       const conversationContent = recentMessages
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n');
@@ -329,20 +225,14 @@ ${conversationContent}
 
 标题：`;
 
-      // 使用Promise来处理异步响应
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         let fullResponse = '';
         
-        // 设置消息处理器
         tempProvider.onMessage((message: string, isFinal: boolean) => {
           fullResponse += message;
           if (isFinal) {
-            // 消息完成
             let title = fullResponse.trim().replace(/^标题[：:]\s*/, '').trim();
-            
-            // 简单的去重逻辑：如果标题看起来像重复的字符串（如 "ABCABC"），则尝试修复
             if (title.length > 4) {
-              // 1. 检查完全重复 (ABCABC)
               if (title.length % 2 === 0) {
                 const halfLen = title.length / 2;
                 const firstHalf = title.substring(0, halfLen);
@@ -351,15 +241,9 @@ ${conversationContent}
                   title = firstHalf;
                 }
               }
-              
-              // 2. 检查模式重复 (AABBAABB) 或其他重复
-              // 使用正则匹配连续重复的子串 (长度至少为2)
               title = title.replace(/(.{2,})\1+/g, '$1');
             }
-            
-            // 关闭临时 Provider
             tempProvider.close();
-            
             resolve({
               title: title || '新对话',
               confidence: 0.8
@@ -367,7 +251,6 @@ ${conversationContent}
           }
         });
         
-        // 设置错误处理器
         tempProvider.onError((error: string) => {
           console.error('生成标题失败:', error);
           tempProvider.close();
@@ -377,18 +260,15 @@ ${conversationContent}
           });
         });
         
-        // 发送消息
         tempProvider.sendMessage(prompt);
       });
     } catch (error) {
       console.error('生成标题失败:', error);
+      return {
+        title: request.type === 'learning' ? '系统化学习' : '新对话',
+        confidence: 0.5
+      };
     }
-
-    // 默认标题
-    return {
-      title: request.type === 'learning' ? '系统化学习' : '新对话',
-      confidence: 0.5
-    };
   }
 
   // 生成默认标题
@@ -410,33 +290,19 @@ ${conversationContent}
     return request.type === 'learning' ? '系统化学习' : '新对话';
   }
 
-  // 清空所有对话历史
-  async clearAllConversations(): Promise<void> {
-    localStorage.removeItem(STORAGE_KEY);
-  }
-
-  // 导出对话历史
+  // 导出对话历史 (从API获取所有数据)
   async exportConversations(): Promise<string> {
-    const conversations = this.getAllConversations();
+    const response = await this.getConversations({ limit: 1000 });
     return JSON.stringify({
-      version: STORAGE_VERSION,
+      version: '1.0',
       exportDate: new Date().toISOString(),
-      conversations
+      conversations: response.conversations
     }, null, 2);
   }
 
-  // 导入对话历史
+  // 导入对话历史 (暂不支持批量导入到数据库，因为需要处理ID冲突等)
   async importConversations(jsonData: string): Promise<boolean> {
-    try {
-      const data = JSON.parse(jsonData);
-      if (data.conversations && Array.isArray(data.conversations)) {
-        this.saveAllConversations(data.conversations);
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('导入对话历史失败:', error);
-      return false;
-    }
+    console.warn('云端存储模式暂不支持批量导入');
+    return false;
   }
 }

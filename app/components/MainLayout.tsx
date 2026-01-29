@@ -14,6 +14,8 @@ const { Header, Content, Footer } = Layout;
 const ReviewNavBadge = dynamic(() => import('./ReviewNavBadge'), { ssr: false });
 const WrongQuestionNavBadge = dynamic(() => import('./WrongQuestionNavBadge'), { ssr: false });
 
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/nextjs';
+
 const MainLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const {
@@ -99,6 +101,27 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
           <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
              <ReviewNavBadge />
              <WrongQuestionNavBadge />
+             
+             {/* 登录/用户状态按钮 */}
+             <div className="flex items-center ml-2">
+               <SignedOut>
+                 <SignInButton mode="modal">
+                   <button className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-full transition-colors shadow-sm">
+                     登录 / 注册
+                   </button>
+                 </SignInButton>
+               </SignedOut>
+               <SignedIn>
+                 <UserButton 
+                   afterSignOutUrl="/"
+                   appearance={{
+                     elements: {
+                       avatarBox: "w-9 h-9 border border-blue-100"
+                     }
+                   }}
+                 />
+               </SignedIn>
+             </div>
           </div>
         </Header>
         <Content style={{ background: '#f8fafc' }}>

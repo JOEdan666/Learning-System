@@ -35,6 +35,8 @@ model KnowledgeBaseItem {
 model LearningSession {
   id               String         @id @default(cuid())
   conversationId   String         @unique
+  conversation     Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId           String?        // Linked to UserProfile.id (Optional for migration)
   subject          String
   topic            String
   aiExplanation    String?
@@ -99,6 +101,7 @@ model UserAnswer {
 model LearningStats {
   id              String   @id @default(cuid())
   conversationId  String   @unique
+  userId          String?  // Linked to UserProfile.id
   totalQuestions  Int      @default(0)
   correctAnswers  Int      @default(0)
   totalScore      Int      @default(0)
@@ -190,10 +193,58 @@ model QuestionQC {
   @@map("question_qc_runs")
 }
 
+// --- User System Models ---
+
+model UserProfile {
+  id        String   @id // Corresponds to Clerk User ID
+  email     String   @unique
+  name      String?
+  grade     String?  
+  region    String?  
+  goals     String[]
+  preferences Json?  // Learning preferences: { style: 'visual', difficulty: 'hard' }
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_profiles")
+}
+
+model Conversation {
+  id            String   @id @default(cuid())
+  userId        String
+  title         String
+  type          String   // 'learning' | 'general'
+  messages      Json     // Array of ChatMessage
+  
+  // Metadata
+  messageCount  Int      @default(0)
+  lastActivity  DateTime @default(now())
+  isArchived    Boolean  @default(false)
+  tags          String[]
+  
+  // Learning specific
+  subject       String?
+  topic         String?
+  aiExplanation String?  @db.Text
+  
+  // Relations
+  learningSession LearningSession?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([lastActivity])
+  @@map("conversations")
+}
+
 // --- Wrong Question Module ---
 
 model WrongQuestion {
   id              String   @id @default(cuid())
+  userId          String   // Linked to UserProfile.id
+
   subject         String
   question        String   @db.Text
   correctAnswer   String?  @db.Text
@@ -228,6 +279,7 @@ model WrongQuestion {
 
 model Note {
   id               String      @id @default(cuid())
+  userId           String?     // Linked to UserProfile.id
   title            String
   icon             String?
   cover            String?
