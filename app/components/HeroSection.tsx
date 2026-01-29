@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { Sparkles, Brain, Target, Rocket, CheckCircle, TrendingUp, Clock } from 'lucide-react'
+import CurrentLearningCard from './Dashboard/CurrentLearningCard'
 
 export default function HeroSection() {
   const features = [
@@ -32,6 +33,11 @@ export default function HeroSection() {
       </div>
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-20 w-full">
+        {/* 尝试加载当前学习卡片，如果有活跃会话则显示 */}
+        <div className="mb-8">
+          <CurrentLearningCard />
+        </div>
+
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           {/* Left content */}
           <div className="text-gray-900">
