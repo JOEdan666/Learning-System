@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import Notion styles */
+@import './styles/notion.css';
+
 :root {
   --primary: #165DFF; /* 蓝色主色调 */
   --primary-dark: #0F4FD8; /* 深蓝辅助色调 */
@@ -161,6 +164,7 @@ body.bg-learn > * {
     border-radius: 0.5rem;
   }
   
+  /* 
   .tech-border::after {
     content: '';
     position: absolute;
@@ -176,6 +180,7 @@ body.bg-learn > * {
     mask-composite: exclude;
     pointer-events: none;
   }
+  */
 }
 
 /* Markdown 表格与内容渲染优化 */

@@ -1,4 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { LearningProgressService } from '@/app/services/learningProgressService'
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url)
+    const type = searchParams.get('type')
+
+    if (type === 'dashboard') {
+      const stats = await LearningProgressService.getGlobalLearningStats()
+      return NextResponse.json({
+        success: true,
+        data: stats
+      })
+    }
+
+    return NextResponse.json({
+      success: false,
+      error: 'Invalid type parameter'
+    }, { status: 400 })
+  } catch (error) {
+    console.error('Analytics GET error:', error)
+    return NextResponse.json({
+      success: false,
+      error: 'Failed to fetch analytics data'
+    }, { status: 500 })
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {

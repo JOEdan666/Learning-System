@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import TableRenderer from './TableRenderer';
 import { ConversationHistory, CreateConversationRequest } from '../types/conversation';
 import { ConversationService } from '../services/conversationService';
@@ -53,240 +53,60 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
   const [selectedGrade, setSelectedGrade] = useState('');
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null); // 消息容器Ref
+  const shouldAutoScrollRef = useRef(true); // 使用 ref 避免闭包问题
+  const [showScrollButton, setShowScrollButton] = useState(false); // 是否显示"新消息"按钮
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true); // 侧边栏开关
   const aiProviderRef = useRef<AIProvider | null>(null);
   const conversationService = ConversationService.getInstance();
   const [kbItems, setKbItems] = useState<KBItem[]>([])
   const [kbService] = useState(() => new KnowledgeBaseService())
+  const userScrollingRef = useRef(false); // 追踪用户是否正在滚动
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 将知识库构造成系统提示，供模型参考
-  const buildKnowledgeBasePrompt = (notes: LearningItem[], kb: KBItem[]): string | null => {
-    const items = notes || []
-    const kbIncluded = (kb || []).filter(it => it.include !== false && (it.text && it.text.trim().length > 0))
-    if (items.length === 0 && kbIncluded.length === 0) return null;
-    // 仅取最近的若干条，避免上下文过长
-    const MAX_ITEMS = 10;
-    const recentNotes = items.slice(-MAX_ITEMS).reverse();
-    const recentKb = kbIncluded.slice(0, MAX_ITEMS)
-    // 按学科分组
-    const bySubject: Record<string, string[]> = {};
-    for (const it of recentNotes) {
-      const subject = it.subject || '其他';
-      const text = (it.text || '').trim();
-      if (!text) continue;
-      const truncated = text.length > 600 ? (text.slice(0, 600) + '…') : text;
-      if (!bySubject[subject]) bySubject[subject] = [];
-      bySubject[subject].push(truncated);
-    }
-    // 知识库作为单独分组
-    if (recentKb.length > 0) {
-      bySubject['知识库'] = recentKb.map(it => {
-        const t = String(it.text || it.ocrText || it.notes || '').trim()
-        return t.length > 800 ? (t.slice(0, 800) + '…') : t
-      }).filter(Boolean)
-    }
-    const subjects = Object.keys(bySubject);
-    if (subjects.length === 0) return null;
-    const parts: string[] = [];
-    parts.push('你是我的学习助理。回答问题时优先基于下列知识库内容；若知识库没有相关信息，请明确说明并再进行通用回答：');
-    for (const s of subjects) {
-      parts.push(`【${s}】`);
-      const lines = bySubject[s].map((t, idx) => `${idx + 1}. ${t}`);
-      parts.push(lines.join('\n'));
-    }
-    return parts.join('\n');
-  };
+  // 引用当前选中的对话，解决闭包问题
+  const selectedConversationRef = useRef(selectedConversation);
 
-  // 初始化AI Provider（仅初始化一次，避免重复注册导致多次回调）
+  // 同步 selectedConversation 到 ref
   useEffect(() => {
-    const provider = createProviderFromEnv();
-    if (provider) {
-      aiProviderRef.current = provider;
+    selectedConversationRef.current = selectedConversation;
+  }, [selectedConversation]);
 
-      // 设置消息处理器
-      provider.onMessage(async (content: string, isFinal: boolean) => {
-        if (!content && !isFinal) return;
-        
-        setMessages(prev => {
-          const lastMessage = prev[prev.length - 1];
-          const validContent = content || '';
-          
-          // 避免在最终空内容事件或空增量时创建空消息
-          if (validContent.length === 0 && (!lastMessage || lastMessage.role !== 'assistant')) {
-            return prev;
-          }
+  // 处理滚动事件，判断用户是否手动向上滚动
+  const handleScroll = useCallback(() => {
+    if (!messagesContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+    // 如果距离底部超过 100px，则停止自动滚动
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
 
-          if (lastMessage && lastMessage.role === 'assistant') {
-            // 更新最后一条助手消息
-            const updatedContent = lastMessage.content + validContent;
-            const updatedMessage = {
-              ...lastMessage,
-              content: updatedContent
-            };
-            return [...prev.slice(0, -1), updatedMessage];
-          } else {
-             // 添加新的助手消息
-             const newMessage: ChatMessage = { role: 'assistant', content: validContent };
-             return [...prev, newMessage];
-           }
-        });
-        
-        if (isFinal) {
-          setIsLoading(false);
-          
-          // 当消息完成时，保存AI回复并处理标题生成
-          setMessages(currentMessages => {
-            const lastMessage = currentMessages[currentMessages.length - 1];
-            if (lastMessage && lastMessage.role === 'assistant' && selectedConversation) {
-              // 保存AI回复
-              conversationService.addMessage(selectedConversation.id, lastMessage).then(updatedConversation => {
-                if (updatedConversation) {
-                  setSelectedConversation(updatedConversation);
-                  loadConversations();
-                  
-                  // 自动生成标题：当消息数量达到4条且标题是默认标题时
-                  if (currentMessages.length >= 4 && 
-                      (updatedConversation.title.includes('对话') || 
-                       updatedConversation.title === '新对话' ||
-                       updatedConversation.title.includes(new Date().toLocaleString('zh-CN')))) {
-                    
-                    conversationService.generateTitle({
-                      messages: currentMessages,
-                      type: updatedConversation.type
-                    }).then(titleResponse => {
-                      if (titleResponse.title && titleResponse.title !== updatedConversation.title) {
-                        // 更新对话标题
-                        conversationService.updateConversation(updatedConversation.id, {
-                          title: titleResponse.title
-                        }).then(titleUpdatedConversation => {
-                          if (titleUpdatedConversation) {
-                            setSelectedConversation(titleUpdatedConversation);
-                            loadConversations();
-                            toast.success(`已自动生成标题: ${titleResponse.title}`);
-                          }
-                        });
-                      }
-                    }).catch(titleError => {
-                      console.warn('自动生成标题失败:', titleError);
-                    });
-                  }
-                }
-              }).catch(error => {
-                console.error('保存AI回复失败:', error);
-              });
-            }
-            return currentMessages;
-          });
-        }
-      });
-
-      // 设置错误处理器
-      provider.onError((errorMsg: string) => {
-        console.error('AI回复失败:', errorMsg);
-        toast.error('AI回复失败');
-        setIsLoading(false);
-      });
+    // 标记用户正在滚动
+    userScrollingRef.current = true;
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
     }
+    scrollTimeoutRef.current = setTimeout(() => {
+      userScrollingRef.current = false;
+    }, 150);
 
-    // 组件卸载时关闭连接
-    return () => {
-      if (aiProviderRef.current) {
-        aiProviderRef.current.close();
-      }
-    };
+    shouldAutoScrollRef.current = isNearBottom;
+    setShowScrollButton(!isNearBottom);
   }, []);
 
-  // 加载对话列表
-  useEffect(() => {
-    loadConversations();
-  }, []);
+  // 滚动到底部函数
+  const scrollToBottom = useCallback((force = false) => {
+    // 如果用户正在滚动，不要自动滚动（除非是强制滚动）
+    if (!force && userScrollingRef.current) return;
 
-  // 加载知识库（用于注入AI上下文）
-  useEffect(() => {
-    (async () => {
-      try {
-        const list = await kbService.getItems()
-        setKbItems(list)
-      } catch (e) {
-        console.warn('加载知识库失败:', e)
+    if (force || shouldAutoScrollRef.current) {
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: force ? 'smooth' : 'auto' });
+      });
+      if (force) {
+        shouldAutoScrollRef.current = true;
+        setShowScrollButton(false);
       }
-    })()
-  }, [kbService])
-
-  // 滚动到底部
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  // 格式化AI消息内容
-  const formatAIMessage = (content: string) => {
-    // 处理Markdown表格
-    const tableRegex = /\|(.+)\|\n\|[-\s|:]+\|\n((?:\|.+\|\n?)*)/g;
-    
-    let formattedContent = content.replace(tableRegex, (match, header, rows) => {
-      const headerCells = header.split('|').map((cell: string) => cell.trim()).filter((cell: string) => cell);
-      const rowsArray = rows.trim().split('\n').map((row: string) => 
-        row.split('|').map((cell: string) => cell.trim()).filter((cell: string) => cell)
-      );
-      
-      let tableHTML = '<div class="overflow-x-auto my-4 rounded-lg shadow-md border border-gray-200">';
-      tableHTML += '<table class="w-full border-collapse bg-white">';
-      
-      // 表头
-      tableHTML += '<thead class="bg-blue-100">';
-      tableHTML += '<tr>';
-      headerCells.forEach((cell: string) => {
-        tableHTML += `<th class="px-4 py-3 text-center text-sm font-bold text-gray-800 border border-gray-300">${cell}</th>`;
-      });
-      tableHTML += '</tr>';
-      tableHTML += '</thead>';
-      
-      // 表体
-      tableHTML += '<tbody>';
-      rowsArray.forEach((row: string[], index: number) => {
-        const bgClass = index % 2 === 0 ? 'bg-white' : 'bg-gray-50';
-        tableHTML += `<tr class="${bgClass} hover:bg-blue-50 transition-colors duration-200">`;
-        row.forEach((cell: string) => {
-          tableHTML += `<td class="px-4 py-3 text-center text-sm text-gray-700 border border-gray-300 whitespace-pre-wrap">${cell}</td>`;
-        });
-        tableHTML += '</tr>';
-      });
-      tableHTML += '</tbody>';
-      tableHTML += '</table>';
-      tableHTML += '</div>';
-      
-      return tableHTML;
-    });
-
-    // 处理Markdown符号 - 使用更安全的正则表达式避免HTML标签冲突
-    
-    // 1. 首先处理代码块符号 ``` - 保持符号可见，显示为蓝色粗体
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)(```)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
-    
-    // 2. 处理行内代码符号 ` - 保持符号可见，显示为蓝色粗体（避免匹配HTML标签内的内容）
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)(?<!`)(\`)(?!`)(?![^<]*>)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
-    
-    // 3. 处理粗体符号 ** - 隐藏符号，显示蓝色粗体文字（避免匹配HTML标签）
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)\*\*([^*<>]+)\*\*(?![^<]*>)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
-    
-    // 4. 处理斜体符号 * - 隐藏符号，显示蓝色斜体文字（避免与列表符号和HTML标签冲突）
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)(?<!\*)\*([^*\n<>]+)\*(?!\*)(?![^<]*>)/g, '<span style="color: #2563eb; font-style: italic;">$1</span>');
-    
-    // 5. 处理标题 - 隐藏符号，只显示黑色粗体标题文字（避免匹配HTML标签）
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)(#{1,6})\s*(.+)$/gm, '<span style="color: #000000; font-weight: bold; font-size: 1.1em;">$2</span>');
-    
-    // 6. 处理有序列表符号 1. 2. 等 - 保持符号可见，显示为蓝色粗体
-    formattedContent = formattedContent.replace(/^(\s*)(\d+\.)\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
-    
-    // 7. 最后处理列表符号 - 和 * - 保持符号可见，显示为蓝色粗体
-    formattedContent = formattedContent.replace(/^(\s*)([-])\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
-    formattedContent = formattedContent.replace(/^(\s*)(\*)\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
-
-    return formattedContent;
-  };
+    }
+  }, []);
 
   const loadConversations = async () => {
     try {
@@ -453,409 +273,590 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
     }
   };
 
-  return (
-    <div className="min-h-screen flex bg-gray-50">
-      {/* 左侧对话列表 */}
-      <div className={`${selectedConversation && !showNewChatForm ? 'hidden lg:block' : 'block'} w-full lg:w-80 flex-shrink-0 bg-white border-r border-gray-200`}>
-        <div className="h-full flex flex-col">
-          {/* 头部 */}
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between mb-4">
-              <h1 className="text-xl font-semibold text-gray-900">对话</h1>
-              {onClose && (
-                <button
-                  onClick={onClose}
-                  className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
+  // 初始化AI Provider（仅初始化一次，避免重复注册导致多次回调）
+  // Memoized function to build knowledge base prompt - prevents recalculation on every render
+  const buildKnowledgeBasePrompt = useCallback((notes: LearningItem[], kb: KBItem[]): string | null => {
+    const items = notes || []
+    const kbIncluded = (kb || []).filter(it => it.include !== false && (it.text && it.text.trim().length > 0))
+    if (items.length === 0 && kbIncluded.length === 0) return null;
+    // 仅取最近的若干条，避免上下文过长
+    const MAX_ITEMS = 10;
+    const recentNotes = items.slice(-MAX_ITEMS).reverse();
+    const recentKb = kbIncluded.slice(0, MAX_ITEMS)
+    // 按学科分组
+    const bySubject: Record<string, string[]> = {};
+    for (const it of recentNotes) {
+      const subject = it.subject || '其他';
+      const text = (it.text || '').trim();
+      if (!text) continue;
+      const truncated = text.length > 600 ? (text.slice(0, 600) + '…') : text;
+      if (!bySubject[subject]) bySubject[subject] = [];
+      bySubject[subject].push(truncated);
+    }
+    // 知识库作为单独分组
+    if (recentKb.length > 0) {
+      bySubject['知识库'] = recentKb.map(it => {
+        const t = String(it.text || it.ocrText || it.notes || '').trim()
+        return t.length > 800 ? (t.slice(0, 800) + '…') : t
+      }).filter(Boolean)
+    }
+    const subjects = Object.keys(bySubject);
+    if (subjects.length === 0) return null;
+    const parts: string[] = [];
+    parts.push('你是我的学习助理。回答问题时优先基于下列知识库内容；若知识库没有相关信息，请明确说明并再进行通用回答：');
+    for (const s of subjects) {
+      parts.push(`【${s}】`);
+      const lines = bySubject[s].map((t, idx) => `${idx + 1}. ${t}`);
+      parts.push(lines.join('\n'));
+    }
+    return parts.join('\n');
+  }, []);
+
+  // 初始化AI Provider（仅初始化一次，避免重复注册导致多次回调）
+  useEffect(() => {
+    const provider = createProviderFromEnv();
+    if (provider) {
+      aiProviderRef.current = provider;
+
+      // 设置消息处理器
+      provider.onMessage(async (content: string, isFinal: boolean) => {
+        if (!content && !isFinal) return;
+        
+        setMessages(prev => {
+          const lastMessage = prev[prev.length - 1];
+          const validContent = content || '';
+          
+          // 避免在最终空内容事件或空增量时创建空消息
+          if (validContent.length === 0 && (!lastMessage || lastMessage.role !== 'assistant')) {
+            return prev;
+          }
+
+          if (lastMessage && lastMessage.role === 'assistant') {
+            // 更新最后一条助手消息
+            const updatedContent = lastMessage.content + validContent;
+            const updatedMessage = {
+              ...lastMessage,
+              content: updatedContent
+            };
+            return [...prev.slice(0, -1), updatedMessage];
+          } else {
+             // 添加新的助手消息
+             const newMessage: ChatMessage = { role: 'assistant', content: validContent };
+             return [...prev, newMessage];
+           }
+        });
+        
+        if (isFinal) {
+          setIsLoading(false);
+          
+          // 当消息完成时，保存AI回复并处理标题生成
+          setMessages(currentMessages => {
+            const lastMessage = currentMessages[currentMessages.length - 1];
+            const currentConv = selectedConversationRef.current;
             
+            // 使用 ref 获取最新的 selectedConversation
+            if (lastMessage && lastMessage.role === 'assistant' && currentConv) {
+              // 确保使用最新的消息内容（从 validContent 累积的结果可能比 state 更新快）
+              // 但这里我们在 setMessages 回调中，currentMessages 是最新的
+              
+              // 保存AI回复
+              conversationService.addMessage(currentConv.id, lastMessage).then(updatedConversation => {
+                if (updatedConversation) {
+                  // 更新本地选中的对话状态，确保包含新消息
+                  setSelectedConversation(prev => {
+                    if (!prev || prev.id !== updatedConversation.id) return prev;
+                    return {
+                      ...updatedConversation,
+                      messages: updatedConversation.messages // 确保消息列表同步
+                    };
+                  });
+                  
+                  // 更新列表中的预览
+                  setConversations(prev => prev.map(c => 
+                    c.id === updatedConversation.id ? updatedConversation : c
+                  ));
+                  
+                  // 自动生成标题：当消息数量达到2条且标题是默认标题时
+                  if (currentMessages.length >= 2 && 
+                      (updatedConversation.title.includes('对话') || 
+                       updatedConversation.title === '新对话' ||
+                       updatedConversation.title.includes(new Date().toLocaleString('zh-CN', { year: 'numeric' }).substring(0, 4)))) { // 简单检查年份
+                    
+                    conversationService.generateTitle({
+                      messages: currentMessages,
+                      type: updatedConversation.type
+                    }).then(titleResponse => {
+                      if (titleResponse.title && titleResponse.title !== updatedConversation.title) {
+                        // 更新对话标题
+                        conversationService.updateConversation(updatedConversation.id, {
+                          title: titleResponse.title
+                        }).then(titleUpdatedConversation => {
+                          if (titleUpdatedConversation) {
+                            // 同步更新选中状态的标题
+                            setSelectedConversation(prev => prev ? { ...prev, title: titleUpdatedConversation.title } : null);
+                            
+                            // 同步更新列表中的标题
+                            setConversations(prev => prev.map(c => 
+                              c.id === titleUpdatedConversation.id ? { ...c, title: titleUpdatedConversation.title } : c
+                            ));
+                            
+                            toast.success(`已自动生成标题: ${titleResponse.title}`);
+                          }
+                        });
+                      }
+                    }).catch(titleError => {
+                      console.warn('自动生成标题失败:', titleError);
+                    });
+                  }
+                }
+              }).catch(error => {
+                console.error('保存AI回复失败:', error);
+              });
+            }
+            return currentMessages;
+          });
+        }
+      });
+
+      // 设置错误处理器
+      provider.onError((errorMsg: string) => {
+        console.error('AI回复失败:', errorMsg);
+        toast.error('AI回复失败');
+        setIsLoading(false);
+      });
+    }
+
+    // 组件卸载时关闭连接
+    return () => {
+      if (aiProviderRef.current) {
+        aiProviderRef.current.close();
+      }
+    };
+  }, []);
+
+  // 加载对话列表
+  useEffect(() => {
+    loadConversations();
+  }, []);
+
+  // 加载知识库（用于注入AI上下文）
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await kbService.getItems()
+        setKbItems(list)
+      } catch (e) {
+        console.warn('加载知识库失败:', e)
+      }
+    })()
+  }, [kbService])
+
+  // 滚动到底部 - 仅在新消息添加时滚动，流式更新时不强制滚动
+  const prevMessagesLengthRef = useRef(messages.length);
+  useEffect(() => {
+    // 只有当消息数量增加时才自动滚动（新消息到达）
+    // 流式更新同一条消息时不触发滚动
+    if (messages.length > prevMessagesLengthRef.current) {
+      scrollToBottom();
+    }
+    prevMessagesLengthRef.current = messages.length;
+  }, [messages.length, scrollToBottom]);
+
+  // UI渲染重构
+  return (
+    <div className="flex h-[calc(100vh-64px)] bg-white overflow-hidden">
+      {/* 移动端遮罩 */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* 左侧对话列表 (侧边栏) - 已现代化为浅色风格 */}
+      <div 
+        className={`
+          fixed inset-y-0 left-0 z-30 w-[260px] bg-gray-50 text-gray-700 border-r border-gray-200 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0
+          ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+          ${!isSidebarOpen && 'lg:hidden'} 
+        `}
+      >
+        <div className="flex flex-col h-full overflow-hidden">
+          {/* 侧边栏头部 - 固定高度 */}
+          <div className="shrink-0 p-3">
             <button
-              onClick={() => setShowNewChatForm(true)}
-              className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+              onClick={() => {
+                setShowNewChatForm(true);
+                if (window.innerWidth < 1024) setIsSidebarOpen(false);
+              }}
+              className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-gray-700 bg-white hover:bg-gray-100 rounded-lg transition-colors border border-gray-200 shadow-sm"
             >
-              新对话
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="font-medium">新对话</span>
+              </div>
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
             </button>
           </div>
 
-          {/* 新对话表单 */}
+          {/* 新对话表单 (嵌入在侧边栏) */}
           {showNewChatForm && (
-            <div className="p-4 border-b border-gray-200 bg-gray-50">
-              <h3 className="text-sm font-medium text-gray-900 mb-3">创建新对话</h3>
-              
-              {/* 对话类型选择 */}
-              <div className="mb-3">
-                <label className="block text-xs font-medium text-gray-700 mb-1">对话类型</label>
-                <div className="flex gap-2">
+            <div className="shrink-0 px-3 pb-3 border-b border-gray-200">
+              <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-3 shadow-sm">
+                <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">创建新对话</h3>
+                
+                {/* 类型切换 */}
+                <div className="flex bg-gray-100 p-1 rounded-lg">
                   <button
                     onClick={() => setChatType('general')}
-                    className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                      chatType === 'general' 
-                        ? 'bg-blue-500 text-white' 
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
+                    className={`flex-1 py-1.5 text-xs rounded-md transition-all ${chatType === 'general' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
                   >
-                    普通对话
+                    普通
                   </button>
                   <button
                     onClick={() => setChatType('learning')}
-                    className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                      chatType === 'learning' 
-                        ? 'bg-green-500 text-white' 
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
+                    className={`flex-1 py-1.5 text-xs rounded-md transition-all ${chatType === 'learning' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
                   >
-                    系统化学习
+                    学习
                   </button>
                 </div>
-              </div>
 
-              {/* 学习对话额外字段 */}
-              {chatType === 'learning' && (
-                <>
-                  <div className="mb-3">
-                    <label className="block text-xs font-medium text-gray-700 mb-1">学科</label>
+                {chatType === 'learning' && (
+                  <div className="space-y-2">
                     <select
                       value={selectedSubject}
                       onChange={(e) => setSelectedSubject(e.target.value)}
-                      className="w-full px-3 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full bg-gray-50 text-gray-900 text-xs border border-gray-200 rounded px-2 py-2 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                     >
                       <option value="">选择学科</option>
-                      {SUBJECTS.map(subject => (
-                        <option key={subject} value={subject}>{subject}</option>
-                      ))}
+                      {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
-                  </div>
-                  
-                  <div className="mb-3">
-                    <label className="block text-xs font-medium text-gray-700 mb-1">学习主题</label>
                     <input
                       type="text"
                       value={learningTopic}
                       onChange={(e) => setLearningTopic(e.target.value)}
-                      placeholder="例如：二次函数"
-                      className="w-full px-3 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="学习主题"
+                      className="w-full bg-gray-50 text-gray-900 text-xs border border-gray-200 rounded px-2 py-2 focus:ring-1 focus:ring-blue-500 focus:outline-none placeholder-gray-400"
                     />
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={selectedRegion}
+                        onChange={(e) => setSelectedRegion(e.target.value)}
+                        className="w-full bg-gray-50 text-gray-900 text-xs border border-gray-200 rounded px-2 py-2 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      >
+                        <option value="">地区</option>
+                        {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                      <select
+                        value={selectedGrade}
+                        onChange={(e) => setSelectedGrade(e.target.value)}
+                        className="w-full bg-gray-50 text-gray-900 text-xs border border-gray-200 rounded px-2 py-2 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      >
+                        <option value="">年级</option>
+                        {GRADES.map(g => <option key={g} value={g}>{g}</option>)}
+                      </select>
+                    </div>
                   </div>
-                  
-                  <div className="mb-3">
-                    <label className="block text-xs font-medium text-gray-700 mb-1">所在地区</label>
-                    <select
-                      value={selectedRegion}
-                      onChange={(e) => setSelectedRegion(e.target.value)}
-                      className="w-full px-3 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">选择地区</option>
-                      {REGIONS.map(region => (
-                        <option key={region} value={region}>{region}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div className="mb-3">
-                    <label className="block text-xs font-medium text-gray-700 mb-1">年级</label>
-                    <select
-                      value={selectedGrade}
-                      onChange={(e) => setSelectedGrade(e.target.value)}
-                      className="w-full px-3 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">选择年级</option>
-                      {GRADES.map(grade => (
-                        <option key={grade} value={grade}>{grade}</option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              )}
+                )}
 
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCreateNewChat}
-                  className="flex-1 px-3 py-1 bg-blue-500 text-white text-xs rounded-md hover:bg-blue-600 transition-colors"
-                >
-                  创建
-                </button>
-                <button
-                  onClick={() => setShowNewChatForm(false)}
-                  className="flex-1 px-3 py-1 bg-gray-300 text-gray-700 text-xs rounded-md hover:bg-gray-400 transition-colors"
-                >
-                  取消
-                </button>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={handleCreateNewChat} className="flex-1 bg-black text-white hover:bg-gray-800 text-xs py-2 rounded font-medium transition-colors">创建</button>
+                  <button onClick={() => setShowNewChatForm(false)} className="flex-1 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 text-xs py-2 rounded transition-colors">取消</button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* 对话列表 */}
-          <div className="flex-1 overflow-y-auto">
-            {conversations.length === 0 ? (
-              <div className="p-4 text-center text-gray-500 text-sm">
-                暂无对话记录
+          {/* 对话列表 - 确保稳定滚动 */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-2 pt-2 pb-0 flex flex-col gap-0.5 scrollbar-thin scrollbar-thumb-gray-300">
+            <div className="text-xs font-medium text-gray-400 px-3 py-2 shrink-0">最近</div>
+            {conversations.map((conversation) => (
+              <div
+                key={conversation.id}
+                onClick={() => {
+                  handleSelectConversation(conversation);
+                  if (window.innerWidth < 1024) setIsSidebarOpen(false);
+                }}
+                className={`group relative flex items-center gap-3 px-3 py-3 text-sm rounded-lg cursor-pointer transition-colors ${
+                  selectedConversation?.id === conversation.id 
+                    ? 'bg-gray-200 text-gray-900 font-medium' 
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <svg className={`w-4 h-4 shrink-0 ${selectedConversation?.id === conversation.id ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+                
+                {editingId === conversation.id ? (
+                   <input
+                    type="text"
+                    autoFocus
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onKeyDown={handleRenameKeyDown}
+                    onBlur={commitRename}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-1 bg-white text-gray-900 text-sm px-2 py-1 border border-blue-500 rounded focus:outline-none shadow-sm"
+                  />
+                ) : (
+                  <div className="flex-1 truncate pr-8">
+                    {conversation.title}
+                  </div>
+                )}
+
+                {/* 悬停操作按钮 (仅在非编辑模式显示) */}
+                {editingId !== conversation.id && (
+                  <div className={`absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1 pl-4 ${
+                    selectedConversation?.id === conversation.id 
+                      ? 'bg-gradient-to-l from-gray-200 to-transparent' 
+                      : 'bg-gradient-to-l from-gray-100 to-transparent'
+                  }`}>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); startRename(conversation); }}
+                      className="p-1.5 hover:text-gray-900 text-gray-500 rounded hover:bg-gray-300 transition-colors"
+                      title="重命名"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleDeleteConversation(conversation.id); }}
+                      className="p-1.5 hover:text-red-500 text-gray-500 rounded hover:bg-gray-300 transition-colors"
+                      title="删除"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                )}
               </div>
-            ) : (
-              conversations.map((conversation) => (
-                <div
-                  key={conversation.id}
-                  className={`p-3 border-b border-gray-100 group hover:bg-gray-50 transition-colors ${
-                    selectedConversation?.id === conversation.id ? 'bg-blue-50 border-blue-200' : ''
-                  }`}
-                >
-                  {editingId === conversation.id ? (
-                    // 重命名模式
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        autoFocus
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={handleRenameKeyDown}
-                        onBlur={commitRename}
-                        className="w-full text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="输入对话标题"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={commitRename}
-                          className="text-xs px-2 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 transition-colors"
-                          aria-label="保存重命名"
-                        >保存</button>
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={cancelRename}
-                          className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 transition-colors"
-                          aria-label="取消重命名"
-                        >取消</button>
-                      </div>
-                    </div>
-                  ) : (
-                    // 正常显示模式
-                    <div className="flex items-start justify-between">
-                      <div 
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => handleSelectConversation(conversation)}
-                      >
-                        <h3 className="text-sm font-medium text-gray-900 truncate">
-                          {conversation.title}
-                        </h3>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className={`px-2 py-0.5 text-xs rounded-full ${
-                            conversation.type === 'learning' 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {conversation.type === 'learning' ? '学习' : '对话'}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            {conversation.messages?.length || 0} 条消息
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {new Date(conversation.updatedAt).toLocaleString('zh-CN')}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startRename(conversation);
-                          }}
-                          className="p-1 text-gray-400 hover:text-blue-500 transition-colors"
-                          title="重命名"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteConversation(conversation.id);
-                          }}
-                          className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                          title="删除"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
+            ))}
+          </div>
+
+          {/* 侧边栏底部 */}
+          <div className="shrink-0 border-t border-gray-200 bg-gray-50">
+            <div className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700">
+              <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm">
+                U
+              </div>
+              <div className="flex flex-col">
+                <span className="font-medium text-gray-900">用户</span>
+                <span className="text-xs text-gray-500">学习者</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* 右侧对话区域 */}
-      <div className={`${selectedConversation ? 'block' : 'hidden lg:block'} flex-1 flex flex-col bg-white`}>
+      {/* 主聊天区域 */}
+      <div className="flex-1 flex flex-col h-full relative">
+        {/* 顶部导航栏 (仅移动端或当侧边栏关闭时显示Toggle) */}
+        <div className="sticky top-0 z-10 flex items-center p-2 text-gray-500 bg-white border-b border-gray-100 lg:hidden">
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-2 hover:bg-gray-100 rounded-md"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <span className="ml-2 font-medium text-gray-700 truncate">
+            {selectedConversation?.title || '新对话'}
+          </span>
+        </div>
+
+        {/* 桌面端侧边栏切换按钮 (悬浮) */}
+        {!isSidebarOpen && (
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="absolute top-4 left-4 z-10 p-2 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 hidden lg:block"
+            title="显示侧边栏"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+        )}
+
         {selectedConversation ? (
           <>
-            {/* 对话头部 */}
-            <div className="p-4 border-b border-gray-200 bg-white">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setSelectedConversation(null)}
-                    className="lg:hidden p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+             {/* 消息滚动区域 */}
+            <div 
+              ref={messagesContainerRef}
+              onScroll={handleScroll}
+              className="flex-1 overflow-y-auto w-full scroll-smooth"
+            >
+              <div className="flex flex-col items-center text-sm dark:bg-gray-800">
+                {/* 顶部留白 */}
+                <div className="w-full h-10 shrink-0" />
+                
+                {/* AI 讲解 (学习模式) */}
+                {selectedConversation.type === 'learning' && selectedConversation.aiExplanation && (
+                   <div className="w-full max-w-3xl px-4 md:px-6 mb-8">
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2 text-green-700 font-medium">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          知识讲解
+                        </div>
+                        <TableRenderer content={selectedConversation.aiExplanation} />
+                      </div>
+                   </div>
+                )}
+
+                {messages.map((message, index) => (
+                  <div
+                    key={index}
+                    className={`w-full text-gray-800 ${
+                      message.role === 'assistant' ? 'bg-gray-50' : 'bg-white'
+                    }`}
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <div>
-                    <h2 className="text-lg font-semibold text-gray-900">{selectedConversation.title}</h2>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className={`px-2 py-0.5 text-xs rounded-full ${
-                        selectedConversation.type === 'learning' 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-blue-100 text-blue-800'
-                      }`}>
-                        {selectedConversation.type === 'learning' ? '系统化学习' : '普通对话'}
-                      </span>
-                      {selectedConversation.subject && (
-                        <span className="text-xs text-gray-500">
-                          {selectedConversation.subject}
-                        </span>
-                      )}
+                    <div className="max-w-3xl mx-auto flex gap-4 p-4 md:py-6 lg:px-0 m-auto">
+                      {/* 头像 */}
+                      <div className="w-8 flex flex-col relative items-end">
+                        <div className={`
+                          relative h-8 w-8 rounded-sm flex items-center justify-center font-bold text-white shrink-0
+                          ${message.role === 'assistant' ? 'bg-green-500' : 'bg-blue-600'}
+                        `}>
+                          {message.role === 'assistant' ? (
+                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                          ) : 'U'}
+                        </div>
+                      </div>
+                      
+                      {/* 消息内容 */}
+                      <div className="relative flex-1 overflow-hidden">
+                        {/* 发送者名称 (可选) */}
+                        <div className="font-semibold text-sm mb-1 opacity-90">
+                           {message.role === 'assistant' ? 'AI 助教' : '你'}
+                        </div>
+                        
+                        <div className="min-h-[20px] break-words">
+                          {message.role === 'assistant' ? (
+                            <TableRenderer content={message.content} />
+                          ) : (
+                            <div className="whitespace-pre-wrap">{message.content}</div>
+                          )}
+                        </div>
+
+                        {/* 图片显示 */}
+                        {message.image && (
+                          <div className="mt-3">
+                            <img 
+                              src={message.image} 
+                              alt="Uploaded" 
+                              className="max-w-md rounded-lg shadow-sm border border-gray-200 cursor-zoom-in"
+                              onClick={() => window.open(message.image, '_blank')}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
+                ))}
+
+                {/* 加载中状态 - 改进的打字指示器 */}
+                {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
+                   <div className="w-full bg-gray-50">
+                      <div className="max-w-3xl mx-auto flex gap-4 p-4 md:py-6 lg:px-0 m-auto">
+                        <div className="w-8 flex flex-col relative items-end">
+                          <div className="h-8 w-8 bg-green-500 rounded-sm flex items-center justify-center text-white">
+                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                           <div className="font-semibold text-sm mb-2 opacity-90">AI 助教</div>
+                           <div className="flex items-center gap-1.5 h-6">
+                              <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
+                              <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1s' }} />
+                              <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1s' }} />
+                              <span className="ml-2 text-sm text-gray-400">正在思考...</span>
+                           </div>
+                        </div>
+                      </div>
+                   </div>
+                )}
+                
+                {/* 底部留白，防止输入框遮挡 */}
+                <div className="w-full h-32 shrink-0" />
+                <div ref={messagesEndRef} />
               </div>
             </div>
 
-            {/* 消息列表 */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* 显示AI讲解内容（仅限系统化学习对话） */}
-              {selectedConversation.type === 'learning' && selectedConversation.aiExplanation && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                      </svg>
-                    </div>
-                    <h3 className="text-sm font-medium text-green-800">AI智能讲解</h3>
-                  </div>
-                  <div className="text-sm text-green-700 break-words">
-                    <TableRenderer content={selectedConversation.aiExplanation} />
-                  </div>
-                </div>
-              )}
-              
-              {messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[70%] p-3 rounded-lg ${
-                      message.role === 'user'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-100 text-gray-900'
-                    }`}
-                  >
-                    <div className="break-words">
-                      {message.role === 'assistant' ? (
-                        <TableRenderer content={message.content} />
-                      ) : (
-                        <div className="whitespace-pre-wrap">{message.content}</div>
-                      )}
-                    </div>
-                    {/* 显示图片（如果有） */}
-                    {message.image && (
-                      <div className="mt-3">
-                        <img 
-                          src={message.image} 
-                          alt="学习内容截图" 
-                          className="max-w-full h-auto rounded-lg border border-gray-200 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
-                          onClick={() => {
-                            // 点击图片放大显示
-                            const modal = document.createElement('div');
-                            modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
-                            modal.onclick = () => modal.remove();
-                            
-                            const img = document.createElement('img');
-                            img.src = message.image!;
-                            img.className = 'max-w-full max-h-full object-contain';
-                            
-                            modal.appendChild(img);
-                            document.body.appendChild(modal);
-                          }}
-                        />
-                        <div className="text-xs text-gray-500 mt-1">
-                          点击图片查看大图
-                        </div>
-                      </div>
-                    )}
-                    {/* 显示时间戳（如果有） */}
-                    {message.timestamp && (
-                      <div className="text-xs text-gray-400 mt-2">
-                        {new Date(message.timestamp).toLocaleString('zh-CN')}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-gray-100 p-3 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              <div ref={messagesEndRef} />
-            </div>
+            {/* 滚动到底部按钮 (当用户向上滚动时显示) */}
+            {showScrollButton && (
+              <button
+                onClick={() => scrollToBottom(true)}
+                className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-white border border-gray-200 shadow-md rounded-full p-2 text-gray-600 hover:text-gray-900 z-10 animate-bounce"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
+              </button>
+            )}
 
             {/* 输入区域 */}
-            <div className="p-4 border-t border-gray-200 bg-white">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
-                  placeholder="输入消息... (Enter发送，Shift+Enter换行)"
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={isLoading}
-                />
-                <button
-                  onClick={handleSendMessage}
-                  disabled={!inputMessage.trim() || isLoading}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  发送
-                </button>
+            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-white via-white to-transparent pt-10 pb-6 px-4">
+              <div className="max-w-3xl mx-auto relative">
+                <div className="relative flex items-end w-full p-3 bg-white border border-gray-200 shadow-lg rounded-2xl overflow-hidden">
+                  <textarea
+                    value={inputMessage}
+                    onChange={(e) => {
+                      setInputMessage(e.target.value);
+                      // 自动调整高度
+                      e.target.style.height = 'auto';
+                      e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
+                    placeholder="发送消息..."
+                    rows={1}
+                    className="w-full max-h-[200px] py-1 pl-1 pr-10 resize-none border-none focus:ring-0 focus:outline-none text-gray-800 placeholder-gray-400 bg-transparent"
+                    style={{ minHeight: '24px' }}
+                    disabled={isLoading}
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!inputMessage.trim() || isLoading}
+                    className={`absolute right-2 bottom-2 p-1.5 rounded-md transition-colors ${
+                      inputMessage.trim() && !isLoading 
+                        ? 'bg-green-500 text-white hover:bg-green-600' 
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="text-center text-xs text-gray-400 mt-2">
+                   AI 可能会产生错误信息，请核对重要事实。
+                </div>
               </div>
             </div>
           </>
         ) : (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center text-gray-500">
-              <svg className="w-16 h-16 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">开始对话</h3>
-              <p className="text-gray-500">选择一个对话或创建新对话开始聊天</p>
-            </div>
+          /* 空状态 */
+          <div className="flex-1 flex flex-col items-center justify-center bg-white text-gray-800">
+             <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-6">
+                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+             </div>
+             <h2 className="text-2xl font-semibold mb-2">有什么可以帮你的吗？</h2>
+             
+             {/* 侧边栏 Toggle (如果已关闭) */}
+             {!isSidebarOpen && (
+               <button 
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="mt-8 px-4 py-2 bg-black text-white rounded-md text-sm hover:bg-gray-800 transition-colors lg:hidden"
+               >
+                 查看历史对话
+               </button>
+             )}
           </div>
         )}
       </div>

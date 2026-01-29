@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { PrismaClient } from '../../generated/prisma'
-
-const prisma = new PrismaClient()
+import { prisma } from '@/app/lib/prisma'
 
 type NotePayload = {
   id: string

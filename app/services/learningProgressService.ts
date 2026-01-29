@@ -1,6 +1,4 @@
-import { PrismaClient } from '../generated/prisma';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export interface LearningProgressData {
   conversationId: string;
@@ -307,10 +305,49 @@ export class LearningProgressService {
     suggestions?: string[];
   }) {
     try {
+      // First, get existing stats to calculate streak
+      const existingStats = await prisma.learningStats.findUnique({
+        where: { conversationId }
+      });
+
+      // Calculate streak based on last active date
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      let currentStreak = existingStats?.currentStreak || 0;
+      let longestStreak = existingStats?.longestStreak || 0;
+      const lastActiveDate = existingStats?.lastActiveDate;
+
+      if (lastActiveDate) {
+        const lastActive = new Date(lastActiveDate);
+        lastActive.setHours(0, 0, 0, 0);
+
+        const daysDiff = Math.floor((today.getTime() - lastActive.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (daysDiff === 0) {
+          // Same day, keep streak
+        } else if (daysDiff === 1) {
+          // Consecutive day, increment streak
+          currentStreak++;
+        } else {
+          // Gap > 1 day, reset streak
+          currentStreak = 1;
+        }
+      } else {
+        // First time, start streak
+        currentStreak = 1;
+      }
+
+      // Update longest streak if current is higher
+      longestStreak = Math.max(longestStreak, currentStreak);
+
       return await prisma.learningStats.upsert({
         where: { conversationId },
         update: {
           ...statsData,
+          currentStreak,
+          longestStreak,
+          lastActiveDate: today,
           updatedAt: new Date()
         },
         create: {
@@ -325,12 +362,83 @@ export class LearningProgressService {
           coachingTime: statsData.coachingTime || 0,
           quizTime: statsData.quizTime || 0,
           weaknesses: statsData.weaknesses,
-          suggestions: statsData.suggestions
+          suggestions: statsData.suggestions,
+          currentStreak: 1,
+          longestStreak: 1,
+          lastActiveDate: today
         }
       });
     } catch (error) {
       console.error('更新学习统计失败:', error);
       throw new Error('更新学习统计失败');
+    }
+  }
+
+  // 获取全局学习统计（用于Dashboard）
+  static async getGlobalLearningStats() {
+    try {
+      // Get aggregate stats across all sessions
+      const [sessionCount, statsAgg, recentSessions] = await Promise.all([
+        prisma.learningSession.count(),
+        prisma.learningStats.aggregate({
+          _sum: {
+            totalQuestions: true,
+            correctAnswers: true,
+            totalTimeSpent: true
+          },
+          _avg: {
+            accuracy: true
+          },
+          _max: {
+            currentStreak: true,
+            longestStreak: true
+          }
+        }),
+        prisma.learningSession.findMany({
+          take: 10,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            subject: true,
+            topic: true,
+            isCompleted: true,
+            createdAt: true
+          }
+        })
+      ]);
+
+      // Get subject breakdown
+      const subjectBreakdown = await prisma.learningSession.groupBy({
+        by: ['subject'],
+        _count: { id: true },
+        orderBy: { _count: { id: 'desc' } }
+      });
+
+      // Calculate completion rate
+      const completedSessions = await prisma.learningSession.count({
+        where: { isCompleted: true }
+      });
+      const completionRate = sessionCount > 0 ? Math.round((completedSessions / sessionCount) * 100) : 0;
+
+      return {
+        totalSessions: sessionCount,
+        completedSessions,
+        completionRate,
+        totalQuestions: statsAgg._sum.totalQuestions || 0,
+        totalCorrect: statsAgg._sum.correctAnswers || 0,
+        overallAccuracy: Math.round(statsAgg._avg.accuracy || 0),
+        totalTimeSpent: statsAgg._sum.totalTimeSpent || 0,
+        currentStreak: statsAgg._max.currentStreak || 0,
+        longestStreak: statsAgg._max.longestStreak || 0,
+        subjectBreakdown: subjectBreakdown.map(s => ({
+          subject: s.subject,
+          count: s._count.id
+        })),
+        recentSessions
+      };
+    } catch (error) {
+      console.error('获取全局学习统计失败:', error);
+      throw new Error('获取全局学习统计失败');
     }
   }
 

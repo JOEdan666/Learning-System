@@ -3,13 +3,9 @@ import NotesSection from '../components/NotesSection'
 import { useEffect } from 'react'
 
 export default function NotesPage() {
-  useEffect(() => {
-    document.body.classList.add('bg-learn')
-    return () => document.body.classList.remove('bg-learn')
-  }, [])
   return (
-    <div className="min-h-screen text-slate-900 dark:text-slate-100">
-      <main className="max-w-6xl w-full mx-auto px-4 py-6">
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <main className="w-full h-[calc(100vh-64px)]">
         <NotesSection />
       </main>
     </div>

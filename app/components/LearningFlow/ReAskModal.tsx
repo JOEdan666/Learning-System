@@ -9,12 +9,21 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import TableRenderer, { parseMarkdownTable } from '../TableRenderer';
 
+// 检测是否为ASCII艺术/树状图
+const isAsciiArt = (text: string): boolean => {
+  const asciiArtChars = /[╱╲├│└─┌┐┘┬┴┼═║╔╗╚╝╠╣╦╩╬▲▼◆●○■□★☆→←↑↓↔⇒⇐⇑⇓]/;
+  const hasMultipleSpaces = /\s{2,}/.test(text);
+  const hasBoxDrawing = /[┌┐└┘├┤┬┴┼│─]/.test(text);
+  return asciiArtChars.test(text) || (hasMultipleSpaces && hasBoxDrawing);
+};
+
 interface ReAskModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onComplete?: (item: { question: string; answer: string; feedback?: string }) => void;
   subject: string;
   topic: string;
-  originalContent: string;
+  context: string; // Renamed from originalContent
 }
 
 interface ChatMessage {
@@ -23,30 +32,63 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-export default function ReAskModal({ isOpen, onClose, subject, topic, originalContent }: ReAskModalProps) {
+export default function ReAskModal({ isOpen, onClose, onComplete, subject, topic, context }: ReAskModalProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Markdown渲染的自定义组件
+  // Markdown渲染的自定义组件（支持ASCII艺术和公式渲染）
   const customComponents = {
     h1: ({ children }: any) => <h1 className="text-xl font-bold mb-3 text-gray-800">{children}</h1>,
     h2: ({ children }: any) => <h2 className="text-lg font-bold mb-2 text-gray-800">{children}</h2>,
     h3: ({ children }: any) => <h3 className="text-base font-bold mb-2 text-gray-700">{children}</h3>,
-    p: ({ children }: any) => <p className="mb-2 text-gray-700 leading-relaxed">{children}</p>,
+    p: ({ children }: any) => {
+      // 检测段落内容是否为ASCII艺术
+      const textContent = typeof children === 'string' ? children :
+        (Array.isArray(children) ? children.map((c: any) => typeof c === 'string' ? c : '').join('') : '');
+
+      if (isAsciiArt(textContent)) {
+        return (
+          <pre className="font-mono text-sm bg-blue-50 p-3 rounded-lg overflow-x-auto my-2 text-gray-700 leading-relaxed whitespace-pre border border-blue-200">
+            {children}
+          </pre>
+        );
+      }
+      return <p className="mb-2 text-gray-700 leading-relaxed">{children}</p>;
+    },
     strong: ({ children }: any) => <strong className="font-bold text-gray-800">{children}</strong>,
     em: ({ children }: any) => <em className="italic text-gray-700">{children}</em>,
     ul: ({ children }: any) => <ul className="list-disc list-inside mb-2 text-gray-700">{children}</ul>,
     ol: ({ children }: any) => <ol className="list-decimal list-inside mb-2 text-gray-700">{children}</ol>,
     li: ({ children }: any) => <li className="mb-1">{children}</li>,
-    code: ({ children, className }: any) => {
-      const isInline = !className;
-      return isInline ? (
-        <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-gray-800">{children}</code>
-      ) : (
-        <code className="block bg-gray-100 p-2 rounded text-sm font-mono text-gray-800 overflow-x-auto">{children}</code>
-      );
+    pre: ({ children }: any) => (
+      <pre className="font-mono text-sm bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto my-2 whitespace-pre">
+        {children}
+      </pre>
+    ),
+    code: ({ inline, className, children }: any) => {
+      const codeContent = String(children).replace(/\n$/, '');
+      const match = /language-(\w+)/.exec(className || '');
+      const lang = match?.[1] || '';
+
+      if (inline) {
+        return <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-gray-800">{children}</code>;
+      }
+
+      // 检测是否为ASCII艺术/知识结构图
+      if (isAsciiArt(codeContent) || lang === 'diagram' || lang === 'ascii' || lang === 'tree') {
+        return (
+          <div className="my-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+            <div className="text-xs text-blue-600 font-medium mb-2">知识结构图</div>
+            <pre className="font-mono text-sm text-gray-800 whitespace-pre overflow-x-auto leading-relaxed">
+              {children}
+            </pre>
+          </div>
+        );
+      }
+
+      return <code className="block bg-gray-100 p-2 rounded text-sm font-mono text-gray-800 overflow-x-auto">{children}</code>;
     },
     blockquote: ({ children }: any) => (
       <blockquote className="border-l-4 border-blue-300 pl-3 my-2 text-gray-600 italic">{children}</blockquote>
@@ -172,7 +214,7 @@ export default function ReAskModal({ isOpen, onClose, subject, topic, originalCo
       const contextPrompt = `你是一位耐心的老师，正在为学生解答关于"${subject} - ${topic}"的问题。
 
 原始讲解内容：
-${originalContent}
+${context}
 
 学生现在有新的问题需要你解答。请基于原始讲解内容，用简洁明了的方式回答学生的问题。如果问题与原内容相关，可以引用原内容；如果是新的问题，请提供清晰的解释。
 
@@ -192,6 +234,13 @@ ${originalContent}
           };
           setMessages(prev => [...prev, assistantMessage]);
           setIsLoading(false);
+          
+          if (onComplete) {
+            onComplete({
+              question: userMessage.content,
+              answer: responseContent
+            });
+          }
         }
       });
 
@@ -235,7 +284,7 @@ ${originalContent}
         {/* 头部 */}
         <div className="flex items-center justify-between p-4 border-b">
           <div>
-            <h2 className="text-lg font-semibold">向AI提问</h2>
+            <h2 className="text-lg font-semibold">向老师提问</h2>
             <p className="text-sm text-gray-600">{subject} - {topic}</p>
           </div>
           <div className="flex items-center space-x-2">
@@ -298,7 +347,7 @@ ${originalContent}
               <div className="bg-gray-100 text-gray-800 p-3 rounded-lg">
                 <div className="flex items-center space-x-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                  <span>AI正在思考...</span>
+                  <span>老师正在思考...</span>
                 </div>
               </div>
             </div>

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '../../generated/prisma';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/app/lib/prisma';
 
 export async function GET(request: NextRequest) {
   try {
@@ -43,12 +41,25 @@ export async function GET(request: NextRequest) {
     const maxPossibleScore = session.quizQuestions.reduce((sum, question) => sum + (typeof question.points === 'number' ? question.points : 1), 0);
     const accuracy = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
 
-    // 计算理解程度（基于正确率和答题时间）
+    // 新的加权掌握度计算
+    // - Quiz accuracy: 40%
+    // - Question difficulty bonus: 20%
+    // - Time efficiency: 15%
+    // - Completion rate: 15%
+    // - Streak bonus: 10%
+    const weightedMastery = calculateWeightedMastery(
+      session.quizQuestions,
+      session.userAnswers,
+      stats,
+      session.isCompleted
+    );
+
+    // 计算理解程度（基于加权掌握度）
     let understandingLevel = 1;
-    if (accuracy >= 90) understandingLevel = 5;
-    else if (accuracy >= 80) understandingLevel = 4;
-    else if (accuracy >= 70) understandingLevel = 3;
-    else if (accuracy >= 60) understandingLevel = 2;
+    if (weightedMastery.totalScore >= 90) understandingLevel = 5;
+    else if (weightedMastery.totalScore >= 80) understandingLevel = 4;
+    else if (weightedMastery.totalScore >= 70) understandingLevel = 3;
+    else if (weightedMastery.totalScore >= 60) understandingLevel = 2;
 
     // 计算学习时长
     const learningDuration = stats?.totalTimeSpent || 0;
@@ -102,6 +113,12 @@ export async function GET(request: NextRequest) {
         level: understandingLevel,
         description: getUnderstandingDescription(understandingLevel)
       },
+
+      // 加权掌握度 (新的评分体系)
+      mastery: {
+        score: weightedMastery.totalScore,
+        breakdown: weightedMastery.breakdown
+      },
       
       // 学习时长
       duration: {
@@ -137,6 +154,106 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// 新的加权掌握度计算函数
+// Weights: Quiz accuracy 40%, Difficulty bonus 20%, Time efficiency 15%, Completion 15%, Streak 10%
+function calculateWeightedMastery(
+  questions: any[],
+  answers: any[],
+  stats: any,
+  isCompleted: boolean
+): {
+  totalScore: number;
+  breakdown: {
+    quizAccuracy: number;
+    difficultyBonus: number;
+    timeEfficiency: number;
+    completionRate: number;
+    streakBonus: number;
+  };
+} {
+  const totalQuestions = questions.length;
+  if (totalQuestions === 0) {
+    return {
+      totalScore: 0,
+      breakdown: { quizAccuracy: 0, difficultyBonus: 0, timeEfficiency: 0, completionRate: 0, streakBonus: 0 }
+    };
+  }
+
+  // 1. Quiz Accuracy (40%)
+  const correctCount = answers.filter(a => a.isCorrect).length;
+  const quizAccuracy = (correctCount / totalQuestions) * 100;
+  const quizScore = quizAccuracy * 0.4;
+
+  // 2. Difficulty Bonus (20%)
+  // Give bonus points for answering harder questions correctly
+  let difficultyBonus = 0;
+  answers.forEach(answer => {
+    if (answer.isCorrect) {
+      const question = questions.find(q => q.id === answer.questionId);
+      if (question) {
+        const difficulty = question.difficulty || 'medium';
+        if (difficulty === 'hard') difficultyBonus += 3;
+        else if (difficulty === 'medium') difficultyBonus += 2;
+        else difficultyBonus += 1;
+      }
+    }
+  });
+  const maxDifficultyBonus = totalQuestions * 3; // max if all hard questions correct
+  const difficultyScore = (difficultyBonus / maxDifficultyBonus) * 100 * 0.2;
+
+  // 3. Time Efficiency (15%)
+  // Faster completion = better score, but not too fast (might indicate guessing)
+  let timeEfficiency = 50; // default middle score
+  if (stats?.totalTimeSpent && totalQuestions > 0) {
+    const avgTimePerQuestion = stats.totalTimeSpent / totalQuestions / 1000; // in seconds
+    if (avgTimePerQuestion >= 10 && avgTimePerQuestion <= 60) {
+      timeEfficiency = 100; // optimal range
+    } else if (avgTimePerQuestion > 60 && avgTimePerQuestion <= 120) {
+      timeEfficiency = 80;
+    } else if (avgTimePerQuestion < 10) {
+      timeEfficiency = 40; // too fast, might be guessing
+    } else {
+      timeEfficiency = 60; // too slow
+    }
+  }
+  const timeScore = timeEfficiency * 0.15;
+
+  // 4. Completion Rate (15%)
+  const completionRate = isCompleted ? 100 : (answers.length / Math.max(totalQuestions, 1)) * 100;
+  const completionScore = completionRate * 0.15;
+
+  // 5. Streak Bonus (10%)
+  // Consecutive correct answers bonus
+  let maxStreak = 0;
+  let currentStreak = 0;
+  const sortedAnswers = [...answers].sort((a, b) =>
+    new Date(a.answeredAt).getTime() - new Date(b.answeredAt).getTime()
+  );
+  sortedAnswers.forEach(answer => {
+    if (answer.isCorrect) {
+      currentStreak++;
+      maxStreak = Math.max(maxStreak, currentStreak);
+    } else {
+      currentStreak = 0;
+    }
+  });
+  const streakBonus = Math.min((maxStreak / totalQuestions) * 100, 100);
+  const streakScore = streakBonus * 0.1;
+
+  const totalScore = Math.round(quizScore + difficultyScore + timeScore + completionScore + streakScore);
+
+  return {
+    totalScore: Math.min(totalScore, 100),
+    breakdown: {
+      quizAccuracy: Math.round(quizAccuracy),
+      difficultyBonus: Math.round((difficultyBonus / maxDifficultyBonus) * 100),
+      timeEfficiency: Math.round(timeEfficiency),
+      completionRate: Math.round(completionRate),
+      streakBonus: Math.round(streakBonus)
+    }
+  };
 }
 
 // 辅助函数：获取理解程度描述

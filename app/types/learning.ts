@@ -20,7 +20,20 @@ export interface LearningSession {
   questionCount?: number;
 }
 
-export type LearningState = 'EXPLAIN' | 'CONFIRM' | 'QUIZ' | 'RESULT' | 'REVIEW' | 'DONE';
+export type LearningState = 'DIAGNOSE' | 'ANALYSIS' | 'REMEDY' | 'VERIFY' | 'DONE' | 'EXPLAIN' | 'CONFIRM' | 'QUIZ' | 'REVIEW' | 'RESULT';
+
+export const STEP_METADATA: Record<LearningState, { label: string; desc: string }> = {
+  DIAGNOSE: { label: '诊断', desc: '极速测验定位薄弱点' },
+  ANALYSIS: { label: '分析', desc: '生成诊断报告' },
+  REMEDY: { label: '补漏', desc: '针对性微课讲解' },
+  VERIFY: { label: '验证', desc: '变式题确认掌握' },
+  DONE: { label: '完成', desc: '学习闭环结束' },
+  EXPLAIN: { label: '讲解', desc: 'AI讲解知识点' },
+  CONFIRM: { label: '确认', desc: '确认理解程度' },
+  QUIZ: { label: '测验', desc: '知识点测验' },
+  REVIEW: { label: '复习', desc: '复习与变式题' },
+  RESULT: { label: '结果', desc: '测验结果' }
+};
 
 export interface LearningStep {
   id: string;

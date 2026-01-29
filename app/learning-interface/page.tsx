@@ -12,18 +12,17 @@ import LearningProgressClient from '../services/learningProgressClient';
 import { LearningState } from '../types/learning';
 import { CurriculumService } from '../services/curriculumService';
 import RegionalCurriculumSelector from '../components/RegionalCurriculumSelector';
+import { KnowledgeBaseService } from '../services/knowledgeBaseService';
 
 const STEP_FLOW: Array<{ key: LearningState; label: string; desc: string }> = [
-  { key: 'EXPLAIN', label: '讲解', desc: 'AI 讲解核心知识' },
-  { key: 'CONFIRM', label: '确认', desc: '检查理解程度' },
-  { key: 'QUIZ', label: '测验', desc: '练习巩固所学' },
-  { key: 'RESULT', label: '结果', desc: '回顾得分与分析' },
-  { key: 'REVIEW', label: '复盘', desc: '行动计划与总结' },
+  { key: 'DIAGNOSE', label: '诊断', desc: '极速测验定位薄弱点' },
+  { key: 'ANALYSIS', label: '分析', desc: '生成诊断报告' },
+  { key: 'REMEDY', label: '补漏', desc: '针对性微课讲解' },
+  { key: 'VERIFY', label: '验证', desc: '变式题确认掌握' },
 ];
 
 // 动态导入组件以避免SSR问题
 const ExplainStep = dynamic(() => import('../components/LearningFlow/ExplainStep'), { ssr: false });
-const ConfirmStep = dynamic(() => import('../components/LearningFlow/ConfirmStep'), { ssr: false });
 const QuizStep = dynamic(() => import('../components/LearningFlow/QuizStep'), { ssr: false });
 const ResultStep = dynamic(() => import('../components/LearningFlow/ResultStep'), { ssr: false });
 const ReviewStep = dynamic(() => import('../components/LearningFlow/ReviewStep'), { ssr: false });
@@ -34,12 +33,14 @@ function LearningInterfaceContent() {
   const topic = searchParams.get('topic') || '';
   const region = searchParams.get('region') || '';
   const grade = searchParams.get('grade') || '';
+  const semester = searchParams.get('semester') || ''; // 读取学期参数
+  const topicId = searchParams.get('topicId') || '';
   const existingConversationId = searchParams.get('conversationId');
   
   const [learningContent, setLearningContent] = useState(''); // 基础学习内容
   const [aiExplanation, setAiExplanation] = useState(''); // AI讲解内容
-  const [isLoading, setIsLoading] = useState(true);
-  const [currentStep, setCurrentStep] = useState<LearningState>('EXPLAIN');
+  const [isLoading, setIsLoading] = useState(false); // 默认为 false，因为我们直接开始
+  const [currentStep, setCurrentStep] = useState<LearningState>('DIAGNOSE'); // 默认为 DIAGNOSE
   const [conversationId, setConversationId] = useState<string | null>(existingConversationId);
   const [hasManualSave, setHasManualSave] = useState(false);
   const [isRestoredSession, setIsRestoredSession] = useState(false);
@@ -168,7 +169,7 @@ function LearningInterfaceContent() {
          if (conversation.learningSession) {
            try {
              // 从LearningSession恢复基本状态
-             setCurrentStep(conversation.learningSession.state || 'EXPLAIN');
+             setCurrentStep((conversation.learningSession.state as LearningState) || 'DIAGNOSE');
              
              // 尝试从学习进度数据库恢复完整学习数据
              try {
@@ -241,7 +242,13 @@ function LearningInterfaceContent() {
        }
       
       // 生成AI学习内容
-      await generateLearningContent();
+      // await generateLearningContent(); 
+      // 改为按需生成，如果是 REMEDY 阶段才生成
+      if (currentStep === 'REMEDY') {
+        await generateLearningContent();
+      } else {
+        setIsLoading(false);
+      }
       
     } catch (error) {
       console.error('初始化学习会话失败:', error);
@@ -254,6 +261,25 @@ function LearningInterfaceContent() {
   const generateLearningContent = async () => {
     try {
       setIsLoading(true);
+      // 1) 优先使用知识库教材内容（更科学、专业）
+      try {
+        const kb = new KnowledgeBaseService();
+        const items = await kb.getItems();
+        const keyword = (topic || '').slice(0, 20);
+        const subjectHint = subject || '';
+        const matched = items.filter(it => (it.text || '').includes(keyword) || (it.name || '').includes(keyword));
+        if (matched.length > 0) {
+          const merged = matched.slice(0, 4).map(it => `### ${it.name}\n\n${(it.text || '').slice(0, 3000)}`).join('\n\n');
+          const header = `## ${subjectHint} · ${topic}\n\n${selectedRegion || region || '通用'} · ${grade || ''}`;
+          const kbContent = `${header}\n\n${merged}`;
+          setLearningContent(kbContent);
+          setAiExplanation(kbContent);
+          setIsLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.warn('知识库内容不可用，降级使用AI生成:', e);
+      }
       const { createProviderFromEnv } = await import('../services/ai');
       const aiProvider = createProviderFromEnv();
       if (!aiProvider) throw new Error('AI服务不可用');
@@ -423,24 +449,22 @@ function LearningInterfaceContent() {
     
     // 根据当前步骤决定下一步
     switch (currentStep) {
-      case 'EXPLAIN':
-        setCurrentStep('CONFIRM');
-        setStepContent('现在让我们通过知识大纲来确认你对这个知识点的理解。');
-        toast.success('进入确认理解阶段');
-        break;
-      case 'CONFIRM':
-        setCurrentStep('QUIZ');
-        toast.success('进入测验阶段');
-        break;
-      case 'QUIZ':
-        setCurrentStep('RESULT');
+      case 'DIAGNOSE':
+        setCurrentStep('ANALYSIS');
         toast.success('查看测验结果');
         break;
-      case 'RESULT':
-        setCurrentStep('REVIEW');
-        toast.success('进入复习阶段');
+      case 'ANALYSIS':
+        setCurrentStep('REMEDY');
+        if (!learningContent) {
+          generateLearningContent();
+        }
+        toast.success('进入知识补漏');
         break;
-      case 'REVIEW':
+      case 'REMEDY':
+        setCurrentStep('VERIFY');
+        toast.success('进入验证阶段');
+        break;
+      case 'VERIFY':
         toast.success('学习完成！');
         // 可以跳转到其他页面或重新开始
         break;
@@ -497,7 +521,7 @@ function LearningInterfaceContent() {
   // 处理确认理解步骤的回调
   const handleConfirmNext = async () => {
     console.log('确认理解步骤完成');
-    setCurrentStep('QUIZ');
+    setCurrentStep('DIAGNOSE');
     toast.success('进入测验阶段');
   };
 
@@ -510,7 +534,7 @@ function LearningInterfaceContent() {
       score: results.score || 0,
     };
     setQuizResults(normalized);
-    setCurrentStep('RESULT');
+    setCurrentStep('ANALYSIS');
     toast.success('测验完成，查看结果');
 
     // 保存测验数据
@@ -532,14 +556,15 @@ function LearningInterfaceContent() {
           topic,
           aiExplanation,
           socraticDialogue,
-          currentStep: 'RESULT',
+          currentStep: 'ANALYSIS',
           quizQuestions: normalized.questions,
           userAnswers,
           finalScore: normalized.score,
           stats: {
+            conversationId,
             accuracy: normalized.score,
             totalQuestions: normalized.questions.length,
-            correctAnswers: userAnswers.filter(a => a.isCorrect).length,
+            correctAnswers: userAnswers.filter((a: any) => a.isCorrect).length,
           },
         });
       } catch (error) {
@@ -551,8 +576,11 @@ function LearningInterfaceContent() {
   // 处理结果查看完成
   const handleResultNext = async () => {
     console.log('结果查看完成');
-    setCurrentStep('REVIEW');
-    toast.success('进入复习阶段');
+    setCurrentStep('REMEDY');
+    if (!learningContent) {
+      generateLearningContent();
+    }
+    toast.success('进入知识补漏');
   };
 
   // 处理复习完成
@@ -583,9 +611,10 @@ function LearningInterfaceContent() {
           userAnswers,
           finalScore: quizResults.score,
           stats: {
+            conversationId,
             accuracy: quizResults.score,
             totalQuestions: quizResults.questions.length,
-            correctAnswers: userAnswers.filter(a => a.isCorrect).length,
+            correctAnswers: userAnswers.filter((a: any) => a.isCorrect).length,
           },
         });
       } catch (error) {
@@ -783,15 +812,15 @@ function LearningInterfaceContent() {
         </div>
 
         {/* 学习流程内容 */}
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg">
-          <div className="p-6 md:p-8">
-            {currentStep === 'EXPLAIN' && (
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg overflow-hidden">
+        <div className="p-6 md:p-8">
+          {currentStep === 'REMEDY' && (
               <ExplainStep 
                 content={learningContent}
                 initialAiExplanation={aiExplanation}
                 onNext={handleNext}
                 onAskQuestion={handleAskQuestion}
-                step="EXPLAIN"
+                step="REMEDY"
                 socraticDialogue={socraticDialogue}
                 onSocraticDialogueUpdate={updateSocraticDialogue}
                 subject={subject}
@@ -799,6 +828,7 @@ function LearningInterfaceContent() {
                 selectedRegion={selectedRegion}
                 selectedCurriculum={selectedCurriculum}
                 grade={grade}
+                semester={semester}
                 onAiExplanationUpdate={async (content: string) => {
                   setAiExplanation(content);
                   if (conversationId) {
@@ -819,53 +849,38 @@ function LearningInterfaceContent() {
               />
             )}
 
-            {currentStep === 'CONFIRM' && (
-              <ConfirmStep
-                content={stepContent || `现在让我们通过知识大纲来确认你对${topic}的理解。`}
-                isLoading={isProcessing}
-                showConfirmation={true}
-                onConfirmUnderstanding={() => {
-                  console.log('确认理解');
-                  handleConfirmNext();
-                }}
-                onContinueExplanation={() => {
-                  console.log('继续讲解');
-                  setCurrentStep('EXPLAIN');
-                  toast.success('返回讲解阶段');
-                }}
-              />
-            )}
-
-            {currentStep === 'QUIZ' && (
+            {currentStep === 'DIAGNOSE' && (
               <QuizStep
                 knowledgeContent={learningContent}
                 region={region}
                 grade={grade}
+                semester={semester}
                 subject={subject}
                 topic={topic}
+                topicId={topicId}
                 onComplete={handleQuizComplete}
-                onBack={() => setCurrentStep('CONFIRM')}
+                onBack={() => {}}
               />
             )}
 
-            {currentStep === 'RESULT' && quizResults && (
+            {currentStep === 'ANALYSIS' && quizResults && (
               <ResultStep
                 answers={quizResults.answers || []}
                 questions={quizResults.questions || []}
                 knowledgeContent={learningContent}
-                onRestart={() => setCurrentStep('QUIZ')}
+                onRestart={() => setCurrentStep('DIAGNOSE')}
                 onContinue={handleResultNext}
               />
             )}
 
-            {currentStep === 'REVIEW' && (
+            {currentStep === 'VERIFY' && (
               <ReviewStep
                 content={learningContent}
                 score={quizResults?.score || 0}
                 totalQuestions={quizResults?.questions?.length || 0}
                 understandingLevel={80}
                 onContinue={handleReviewComplete}
-                onRestart={() => setCurrentStep('EXPLAIN')}
+                onRestart={() => setCurrentStep('REMEDY')}
                 session={{
                   topic: topic || '',
                   subject: subject || '',

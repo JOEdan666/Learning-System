@@ -4,6 +4,7 @@ export interface CurriculumStandard {
   id: string;
   region: string;
   grade: string;
+  semester?: '上册' | '下册'; // 新增学期字段
   subject: string;
   topics: CurriculumTopic[];
   examRequirements: ExamRequirement[];

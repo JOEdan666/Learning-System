@@ -29,6 +29,7 @@ export default function ResultStep({ answers, questions, knowledgeContent, onRes
   const [totalScore, setTotalScore] = useState(0)
   const [maxPossibleScore, setMaxPossibleScore] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  const [isAnalyzing, setIsAnalyzing] = useState(false) // New state for AI analysis status
   const [overallFeedback, setOverallFeedback] = useState('')
   const [learningAdvice, setLearningAdvice] = useState<string[]>([])
   const [strengthAreas, setStrengthAreas] = useState<string[]>([])
@@ -40,19 +41,76 @@ export default function ResultStep({ answers, questions, knowledgeContent, onRes
     console.log('开始评分...', { answers, questions, knowledgeContent })
     setIsLoading(true)
     
+    // 1. 本地即时算分 (Immediate Local Grading)
     // 计算最大可能分数
     const maxScore = questions.reduce((sum, question) => sum + (question.points || 10), 0)
     setMaxPossibleScore(maxScore)
-    
-    // 重置所有状态
-    setGradingResults([])
-    setTotalScore(0)
-    setOverallFeedback('')
-    setLearningAdvice([])
-    setStrengthAreas([])
-    setImprovementAreas([])
-    setWrongAnswers([])
 
+    // 初步评分逻辑
+    const initialResults: GradingResult[] = questions.map((question, index) => {
+      const studentAnswer = (answers[index] || '').trim();
+      const correctAnswer = (question.correctAnswer || '').trim();
+      let score = 0;
+      let isCorrect = false;
+
+      // 简单判断逻辑
+      if (question.type === 'multiple_choice' || question.type === 'true_false') {
+        // 提取首字母进行比较 (处理 "A. 选项" vs "A")
+        const sa = studentAnswer.charAt(0).toUpperCase();
+        const ca = correctAnswer.charAt(0).toUpperCase();
+        if (sa === ca && sa !== '') {
+          score = question.points || 10;
+          isCorrect = true;
+        }
+      } else {
+        // 填空题/简答题：完全匹配才算分，否则等待AI
+        if (studentAnswer === correctAnswer && studentAnswer !== '') {
+          score = question.points || 10;
+          isCorrect = true;
+        }
+      }
+
+      return {
+        questionId: question.id,
+        score: score,
+        maxScore: question.points || 10,
+        aiSolution: 'AI标准解答生成中...',
+        solutionSteps: [],
+        studentAnalysis: 'AI正在深入分析您的解题思路...',
+        errorType: isCorrect ? '正确' : '待分析',
+        feedback: isCorrect ? '回答正确！' : 'AI正在生成详细反馈...',
+        suggestions: []
+      };
+    });
+
+    // 更新本地计算的总分
+    const initialTotal = initialResults.reduce((sum, r) => sum + r.score, 0);
+    setTotalScore(initialTotal);
+    setGradingResults(initialResults);
+
+    // 初步错题集
+    const initialWrong = initialResults
+      .map((r, index) => {
+        if (r.score < r.maxScore) {
+          return {
+            questionId: r.questionId,
+            question: questions[index]?.question || '',
+            userAnswer: answers[index] || '未作答',
+            correctAnswer: questions[index]?.correctAnswer || '',
+            errorType: '待分析'
+          };
+        }
+        return null;
+      })
+      .filter((item): item is {questionId: number, question: string, userAnswer: string, correctAnswer: string, errorType: string} => item !== null);
+    
+    setWrongAnswers(initialWrong);
+
+    // 立即停止全屏Loading，展示初步结果
+    setIsLoading(false);
+    setIsAnalyzing(true); // 开启AI分析状态
+
+    // 2. 异步调用AI进行深度分析
     try {
       
       // 准备批改数据
@@ -300,9 +358,11 @@ ${item.correctAnswer ? `正确答案：${item.correctAnswer}` : ''}
       setTotalScore(defaultTotal)
       setWrongAnswers(defaultWrongAnswers)
       setOverallFeedback('您对本次学习内容有一定的理解，建议继续努力，加强练习。')
-      setLearningAdvice(['重新阅读学习材料', '多做相关练习', '与他人讨论交流'])
+      setLearningAdvice(['重新阅读学习材料', '多做相关练习'])
+      setStrengthAreas(['学习态度积极'])
+      setImprovementAreas(['知识掌握', '解题技巧'])
     } finally {
-      setIsLoading(false)
+      setIsAnalyzing(false)
     }
   }
 
@@ -345,20 +405,14 @@ ${item.correctAnswer ? `正确答案：${item.correctAnswer}` : ''}
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100 relative">
-        <div className="relative z-10 container mx-auto px-4 py-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center py-20">
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                className="w-16 h-16 border-4 border-green-200 border-t-green-600 rounded-full mx-auto mb-6"
-              />
-              <h2 className="text-2xl font-bold text-gray-800 mb-4">AI正在批改您的答案...</h2>
-              <p className="text-gray-600">专业评估中，请稍候</p>
-            </div>
-          </div>
-        </div>
+      <div className="min-h-[400px] flex flex-col items-center justify-center py-12">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+          className="w-16 h-16 border-4 border-blue-100 border-t-blue-600 rounded-full mb-6"
+        />
+        <h2 className="text-xl font-bold text-slate-800 mb-2">AI正在批改您的答案...</h2>
+        <p className="text-slate-500">专业评估中，请稍候</p>
       </div>
     )
   }
@@ -384,6 +438,13 @@ ${item.correctAnswer ? `正确答案：${item.correctAnswer}` : ''}
               </div>
               
               <h1 className="text-3xl font-bold text-gray-800 mb-4">测验结果</h1>
+              
+              {isAnalyzing && (
+                <div className="flex items-center justify-center gap-2 mb-6 text-blue-600 bg-blue-50 px-4 py-2 rounded-full text-sm font-medium animate-pulse">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  AI正在深入分析您的解题思路...
+                </div>
+              )}
               
               <div className="flex items-center justify-center space-x-8 mb-6">
                 <div className="text-center">

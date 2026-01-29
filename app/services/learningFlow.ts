@@ -126,13 +126,23 @@ export class LearningFlowService {
       ?.map((material, index) => `材料${index + 1}（${material.subject}）：${material.content}`)
       .join('\n\n') || '';
 
-    const prompt = `你是"AI讲解教练"。请为${subject}科目讲解"${topic}"这个知识点，要求：
-1. 用简单易懂的语言，确保学生能够理解核心概念
-2. 提供具体的例子或应用场景
-3. 结构化讲解，包括定义、重要性、关键点
-4. 控制在300字以内
-5. 讲解内容要全面，覆盖以下学习材料中的所有重要信息：
+    const prompt = `你是"AI讲解教练"，专注于帮助学生高效掌握考点。请为${subject}科目讲解"${topic}"这个知识点。
 
+## 讲解要求：
+1. **聚焦核心考点**：直接讲解考试重点，不说废话
+2. **易错易混辨析**：指出学生常见的错误和混淆点
+3. **解题关键点**：传授解题的核心技巧和步骤
+4. **言简意赅**：每句话都要有信息量，控制在400字以内
+5. **不举不必要的例子**：不要举跨学科或生活中不相关的例子
+
+## 内容结构：
+- 核心概念（精确定义）
+- 关键公式/结论（含适用条件）
+- 解题步骤（可操作）
+- 易错点提醒
+- 记忆技巧（如有）
+
+参考材料：
 ${materialsContent}`;
 
     return new Promise((resolve, reject) => {
@@ -164,20 +174,30 @@ ${materialsContent}`;
       ?.map((material, index) => `材料${index + 1}（${material.subject}）：${material.content}`)
       .join('\n\n') || '';
 
-    const prompt = `请基于"${topic}"这个知识点，生成5道测验题，题型混合（选择题、判断题、简答题）。
-请根据以下学习材料生成题目：
+    const prompt = `请基于"${topic}"这个知识点，生成5道高质量测验题。
 
+## 命题要求：
+1. **聚焦核心考点**：每道题必须考查该知识点的核心内容
+2. **突出易错点**：干扰项要基于学生常见错误设计
+3. **解析要精准**：必须包含考点、解题关键、易错分析
+
+## 题型分布：
+- 3道选择题（考查概念理解和易错点）
+- 1道判断题
+- 1道简答题（考查核心步骤或公式）
+
+参考材料：
 ${materialsContent}
-请以JSON格式回复，包含题目、类型、选项（如果是选择题）、正确答案和解析：
 
+请以JSON格式回复：
 [
   {
     "id": "1",
-    "question": "题目内容",
+    "question": "题目内容（简洁明了）",
     "type": "multiple_choice|true_false|short_answer",
     "options": ["选项A", "选项B", "选项C", "选项D"],
     "correctAnswer": "正确答案",
-    "explanation": "解析"
+    "explanation": "【考点】xxx【解题关键】xxx【易错分析】xxx"
   }
 ]`;
 
@@ -308,7 +328,7 @@ ${i+1}. ${q.question}
       ?.map((material, index) => `材料${index + 1}（${material.subject}）：${material.content}`)
       .join('\n\n') || '';
 
-    const prompt = `你是"AI复盘教练"。请基于以下学习会话数据生成学习复盘：
+    const prompt = `你是"AI复盘教练"。请基于以下数据生成精准的学习复盘：
 
 学习主题：${session.topic}
 科目：${session.subject}
@@ -317,13 +337,17 @@ ${i+1}. ${q.question}
 学习材料：
 ${materialsContent}
 
-请生成一份学习复盘，包括：
-1. 知识点掌握情况评估
-2. 学习过程中的亮点
-3. 需要改进的地方
-4. 明日学习建议
+## 复盘要求：
+1. **言简意赅**，不说废话，每句话都要有价值
+2. **聚焦问题**，直接指出薄弱环节
+3. **给出具体建议**，可操作的改进方法
 
-控制在200字以内，语言积极鼓励。`;
+## 复盘内容：
+1. **掌握情况**：哪些考点已掌握？哪些还需加强？
+2. **易错点回顾**：测验中暴露的问题
+3. **改进建议**：具体的复习方法和重点
+
+控制在150字以内，直接给出有价值的反馈。`;
 
     return new Promise((resolve, reject) => {
       let response = '';

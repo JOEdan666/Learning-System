@@ -53,6 +53,9 @@ model LearningSession {
   quizQuestions    QuizQuestion[]
   userAnswers      UserAnswer[]
 
+  @@index([subject, topic])
+  @@index([createdAt])
+  @@index([isCompleted])
   @@map("learning_sessions")
 }
 
@@ -71,6 +74,7 @@ model QuizQuestion {
   session       LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   userAnswers   UserAnswer[]
 
+  @@index([sessionId, order])
   @@map("quiz_questions")
 }
 
@@ -86,6 +90,9 @@ model UserAnswer {
   question   QuizQuestion    @relation(fields: [questionId], references: [id], onDelete: Cascade)
   session    LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
+  @@index([sessionId])
+  @@index([questionId])
+  @@index([isCorrect])
   @@map("user_answers")
 }
 
@@ -103,8 +110,158 @@ model LearningStats {
   quizTime        Int      @default(0)
   weaknesses      Json?
   suggestions     Json?
+  // Streak tracking fields
+  currentStreak   Int      @default(0)
+  longestStreak   Int      @default(0)
+  lastActiveDate  DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@map("learning_stats")
+}
+
+// --- RAG System Models ---
+
+model KnowledgeChunk {
+  id        String   @id @default(cuid())
+  content   String
+  // Use Unsupported type for pgvector. 
+  // IMPORTANT: You must run `CREATE EXTENSION IF NOT EXISTS vector;` in your DB.
+  vector    Unsupported("vector(1536)")?
+  
+  // Metadata
+  type      String   // ChunkType: SYLLABUS, EXAM_PROFILE, TEMPLATE, PITFALL
+  subject   String
+  grade     String?
+  region    String?
+  tags      String[] // Stored as array of strings
+  
+  createdAt DateTime @default(now())
+  
+  @@map("knowledge_chunks")
+}
+
+model LocalExamProfile {
+  id        String   @id @default(cuid())
+  region    String
+  subject   String
+  year      Int
+  
+  // JSON structure: { knowledgeDistribution: {}, questionTypeRatio: {}, bloomTaxonomy: {} }
+  profileData Json
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([region, subject, year])
+  @@map("local_exam_profiles")
+}
+
+model QuestionBank {
+  id          String   @id @default(cuid())
+  // Structure: { stem: string, options?: [], answer: string, analysis: string, points: number }
+  content     Json
+  hash        String   @unique // MD5 of content.stem to prevent duplicates
+  
+  subject     String
+  grade       String
+  region      String
+  difficulty  Float
+  knowledgePoints String[]
+  
+  qcStatus    String   @default("PENDING") // PENDING, PASSED, FAILED
+  qcLog       Json?    // Array of QC check results
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("question_bank")
+}
+
+model QuestionQC {
+  id            String   @id @default(cuid())
+  questionId    String
+  result        String   // PASS, FAIL
+  checkType     String   // FORMAT, LOGIC, CONTENT_MODEL
+  details       String?
+  createdAt     DateTime @default(now())
+
+  @@index([questionId])
+  @@map("question_qc_runs")
+}
+
+// --- Wrong Question Module ---
+
+model WrongQuestion {
+  id              String   @id @default(cuid())
+  subject         String
+  question        String   @db.Text
+  correctAnswer   String?  @db.Text
+  userAnswer      String?  @db.Text
+  analysis        String?  @db.Text
+  source          String?
+  tags            String[]
+  imageUrls       String[]
+  answerImageUrls String[]
+  aiAnalysis      Json?
+  knowledgePoints String[]
+  relatedNotes    String[]
+  relatedQuestions String[]
+  stage           Int      @default(0)
+  nextReviewAt    DateTime
+  lastReviewedAt  DateTime?
+  reviewHistory   Json?
+  reviewCount     Int      @default(0)
+  status          String   @default("active")
+  isFavorite      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([subject])
+  @@index([nextReviewAt])
+  @@index([status])
+  @@index([updatedAt])
+  @@map("wrong_questions")
+}
+
+// --- Notes Module ---
+
+model Note {
+  id               String      @id @default(cuid())
+  title            String
+  icon             String?
+  cover            String?
+  backlinks        String[]
+  forwardLinks     String[]
+  knowledgePoints  String[]
+  relatedQuestions String[]
+  tags             String[]
+  template         String?
+  color            String      @default("#3b82f6")
+  isFavorite       Boolean     @default(false)
+  isArchived       Boolean     @default(false)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  blocks           NoteBlock[]
+
+  @@index([updatedAt])
+  @@index([isFavorite])
+  @@index([isArchived])
+  @@map("notes")
+}
+
+model NoteBlock {
+  id         String   @id @default(cuid())
+  noteId     String
+  type       String
+  content    String   @db.Text
+  properties Json?
+  order      Int
+  parentId   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  note       Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  @@index([noteId, order])
+  @@map("note_blocks")
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { toast } from 'react-hot-toast'
 import type { LearningItem } from '../types'
 
@@ -9,6 +9,7 @@ const STORAGE_VERSION_KEY = 'learning_system_version'
 const STORAGE_BACKUP_KEY = `${STORAGE_KEY}_backup`
 const CURRENT_VERSION = '2.0.0'
 const MAX_ITEMS = 500
+const DEBOUNCE_MS = 500 // Debounce delay for localStorage writes
 
 const isValidItem = (item: any): item is LearningItem => {
   return (
@@ -49,6 +50,9 @@ export const useLearningStorage = () => {
   const [isStorageAvailable, setIsStorageAvailable] = useState(true)
   const [lastSavedTime, setLastSavedTime] = useState<string>('')
 
+  // Ref for debounce timeout management
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
   useEffect(() => {
     const available = checkStorage()
     setIsStorageAvailable(available)
@@ -70,17 +74,40 @@ export const useLearningStorage = () => {
     }
   }, [])
 
+  // Debounced persist function to prevent UI jank during rapid updates
   const persistItems = useCallback(
     (items: LearningItem[]) => {
       if (!isStorageAvailable) return
-      const payload = JSON.stringify(items.slice(-MAX_ITEMS))
-      localStorage.setItem(STORAGE_BACKUP_KEY, payload)
-      localStorage.setItem(STORAGE_KEY, payload)
-      localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_VERSION)
-      setLastSavedTime(new Date().toLocaleTimeString())
+
+      // Clear any pending debounced write
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current)
+      }
+
+      // Schedule debounced write
+      debounceTimeoutRef.current = setTimeout(() => {
+        try {
+          const payload = JSON.stringify(items.slice(-MAX_ITEMS))
+          localStorage.setItem(STORAGE_BACKUP_KEY, payload)
+          localStorage.setItem(STORAGE_KEY, payload)
+          localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_VERSION)
+          setLastSavedTime(new Date().toLocaleTimeString())
+        } catch (error) {
+          console.warn('Failed to persist items to localStorage:', error)
+        }
+      }, DEBOUNCE_MS)
     },
     [isStorageAvailable]
   )
+
+  // Cleanup debounce timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (savedItems.length === 0) {

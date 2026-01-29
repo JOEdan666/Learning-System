@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { LearningSession, LearningState, StudentProfile, LearningStep, LearningMaterial } from '../../types/learning';
 import { ConversationHistory, CreateConversationRequest } from '../../types/conversation';
 import { ConversationService } from '../../services/conversationService';
@@ -33,7 +33,7 @@ class LearningFlowService {
   }
 
   // 辅助方法：使用AI Provider发送消息并获取响应
-  private async sendAIMessage(prompt: string): Promise<string> {
+  private async sendAIMessage(prompt: string, onProgress?: (content: string) => void): Promise<string> {
     if (!this.aiProvider) {
       throw new Error('AI Provider 未初始化');
     }
@@ -44,6 +44,10 @@ class LearningFlowService {
       // 设置消息处理器
       this.aiProvider!.onMessage((message: string, isFinal: boolean) => {
         fullResponse += message;
+        // 如果提供了进度回调，实时通知
+        if (onProgress) {
+            onProgress(fullResponse);
+        }
         if (isFinal) {
           resolve(fullResponse);
         }
@@ -170,99 +174,90 @@ class LearningFlowService {
   }
 
   // 生成知识点讲解
-  private async generateExplanation(topic: string, subject: string): Promise<string> {
+  private async generateExplanation(topic: string, subject: string, onProgress?: (content: string) => void): Promise<string> {
     // 构建学习材料内容 - 只使用与当前学习主题相关的材料
     const relevantMaterials = this.filterRelevantMaterials(topic, subject);
     const materialsContent = this.buildMaterialsContent(relevantMaterials);
 
     const prompt = `🎭 角色设定
-你是一名【AI学习教练】，负责讲解任何学科或知识点（语文、数学、英语、物理、化学、生物、历史、地理、政治、编程、通识、音乐等）。
-你融合课本知识、考试要求与跨学科创造思维，帮助我真正"学懂—会用—能迁移"。
-你的身份：既是学霸级教练，也是启发式导师。
+你是一名【AI学习教练】，专注于帮助学生高效备考，掌握核心知识点和解题技巧。
 
 ---
 
-🎯 总目标
-让我真正掌握并能灵活运用知识点，不只是看懂，而是能用于考试、生活和创造。
-讲解内容要有层次，从入门到拔高，配合例题与反思。
-可以引入跨学科或生产创造视角，帮助我建立更深的理解与实践连接。
+🎯 核心目标
+让学生真正掌握考试重点，能够在考试中灵活运用。聚焦于：
+1. **考点精讲**：直击考试高频考点
+2. **易错易混辨析**：帮助学生规避常见陷阱
+3. **解题核心关键点**：传授解题的关键技巧和思路
 
 ---
 
 🧠 讲解要求
-请用自然、灵活的方式讲解知识点，语言通俗、逻辑清晰、循序渐进。
-
 当前学习主题：**${topic}**（${subject}学科）
 
 ${materialsContent ? `## 📖 课程材料参考
-以下材料为讲解的重要参考，请抽取其中的定义、结论、例题要点：
 ${materialsContent}
-> 若材料与常识冲突，以材料为准；若材料缺失信息，可在不冲突前提下补充严谨常识。` : ''}
+> 若材料与常识冲突，以材料为准。` : ''}
 
-请用自然、灵活的方式讲解这个知识点，可以包含但不限于以下内容：
-- 核心概念和知识点的清晰解释
-- 原理或推理逻辑的阐述
-- 解题方法或步骤的介绍
-- 实例或生活应用的展示
-- 形式化表达（公式、定义、符号等）
-- 直观理解（例子、类比、表格等）
-- 验证方法或推理步骤
-- 常见题型与解法思路
-- 例题讲解和延伸
-- 易错点提醒
-- 拔高与竞赛拓展
-- 跨学科应用
-- 学习反思和行动建议
+**请按以下结构进行精准讲解：**
+
+### 一、核心考点
+- 本知识点的考试重点是什么？
+- 常考题型有哪些？
+- 出题角度有哪些变化？
+
+### 二、知识精讲
+- 核心概念的精确定义（附公式/符号/单位）
+- 关键原理和推导逻辑
+- **解题的核心步骤和方法**（这是重点！）
+
+### 三、易错易混点
+- 学生最容易犯的错误有哪些？
+- 容易混淆的概念如何区分？
+- 常见的思维误区和陷阱
+
+### 四、解题技巧
+- 快速解题的关键技巧
+- 审题要点和突破口
+- 典型例题演示（含详细步骤）
+
+### 五、总结口诀/记忆要点
+- 帮助记忆的口诀或关键词
+- 核心公式/结论汇总
 
 ## 📝 写作要求
-- 用中文；**加粗**核心术语；重要提示用">"
-- 术语首次出现需给出**符号/单位/定义**
-- 例题过程里对关键步骤**加粗**
-- 内容要丰富充实，信息密度高且句子简洁
-- 避免固定的格式模板，用自然的方式组织内容
+- **言简意赅，不说废话**，每句话都要有信息量
+- **加粗**核心术语和关键步骤
+- 重要提示用">"引用格式
+- **不要举不必要的跨学科或生活例子**，聚焦于学科本身
+- 例子要精选，只举最典型、最能说明问题的例子
+- 信息密度要高，内容要实用
 
 ## ✅ 质量要求
-确保知识点准确且与材料一致；解题流程可复用；每条结论/公式都有适用条件；例题步骤可逐步复核。
+- 确保知识点准确
+- 解题方法可复用、可操作
+- 每条结论/公式都说明适用条件
+- 例题步骤清晰可验证
 
-请用生动有趣、逻辑清晰的方式，对"${topic}"进行深入讲解，激发我的思考和解题能力。`;
+请对"${topic}"进行精准、高效的讲解，帮助学生快速掌握考点和解题技巧。`;
 
     try {
       console.log('[LearningFlowService] 开始生成讲解内容，主题:', topic, '学科:', subject);
       
       // 使用Xunfei API生成讲解内容
-      const content = await this.sendAIMessage(prompt);
+      const content = await this.sendAIMessage(prompt, onProgress);
       
       if (content && content.trim()) {
         console.log('[LearningFlowService] 成功生成讲解内容，长度:', content.length);
         return content;
       } else {
-        console.warn('[LearningFlowService] API返回空内容，使用fallback');
-        return this.generateFallbackExplanation(topic, subject);
+        console.warn('[LearningFlowService] API返回空内容');
+        return `抱歉，生成讲解内容失败。请尝试重新刷新或联系管理员。`;
       }
     } catch (error) {
       console.error('[LearningFlowService] AI生成讲解内容出错:', error);
-      // 出错时返回更详细的fallback内容
-      return this.generateFallbackExplanation(topic, subject);
+      return `抱歉，生成讲解内容时出现错误: ${(error as Error).message || '未知错误'}`;
     }
-  }
-
-  // 生成fallback讲解内容
-  private generateFallbackExplanation(topic: string, subject: string): string {
-    return `### 📚 核心概念
-**${topic}**是${subject}中的重要概念，需要我们深入理解和掌握。
-
-### 🎯 为什么重要
-在${subject}学习中，${topic}是基础知识点，对后续学习具有重要意义。
-
-### 💡 关键要点
-* **基本定义**：${topic}的基本含义和特征
-* **重要性质**：${topic}具有的主要性质和规律
-* **应用方法**：如何在实际问题中运用${topic}
-
-### ⚠️ 注意事项
-> 学习${topic}时，需要注意理解其本质含义，避免死记硬背，要通过练习加深理解。
-
-*注：当前显示的是默认内容，实际使用中会由AI生成更详细的讲解。*`;
   }
 
   // 生成苏格拉底式提问
@@ -507,7 +502,7 @@ ${materialsContent}
   }
 
   // 处理学习流程的下一步
-  async nextStep(sessionId: string, currentState: LearningState, userInput: string, isQuestion: boolean = false): Promise<{
+  async nextStep(sessionId: string, currentState: LearningState, userInput: string, isQuestion: boolean = false, onProgress?: (content: string) => void): Promise<{
     nextState: LearningState;
     content: string;
     data?: any;
@@ -547,10 +542,10 @@ ${materialsContent}
 6. 确保回答内容能够完全解决学生的疑问，内容要准确、有针对性`;
           
           try {
-            content = await this.sendAIMessage(prompt);
+            content = await this.sendAIMessage(prompt, onProgress);
           } catch (error) {
             console.error('[LearningFlowService] 生成问题解答出错:', error);
-            content = `这里是对您问题的解答。在实际应用中，这里会由AI生成详细的回答。`;
+            content = `这里是对您问题的解答。在实际应用中，这里会由专业老师生成详细的回答。`;
           }
           step.output = { explanation: content, question: userInput };
           // 保持在EXPLAIN状态，让学生继续提问或理解
@@ -559,12 +554,12 @@ ${materialsContent}
           // 学生点击"我已理解，继续"按钮，准备进入知识确认环节
           if (userInput === 'NEXT_TO_CONFIRM' || userInput.includes('我已理解') || userInput.includes('继续')) {
             // 进入知识确认环节，生成知识大纲
-            content = '正在为你生成知识大纲...';
+            content = '正在生成知识大纲...';
             step.output = { transitionToConfirm: true };
             nextState = 'CONFIRM';
           } else {
             // 初始讲解阶段
-            const explanation = await this.generateExplanation(this.currentSession.topic, this.currentSession.subject);
+            const explanation = await this.generateExplanation(this.currentSession.topic, this.currentSession.subject, onProgress);
             content = explanation;
             step.output = { explanation };
             // 保持在EXPLAIN状态，等待学生理解并点击继续
@@ -591,9 +586,25 @@ ${materialsContent}
         } else if (userInput.includes('继续讲解') || userInput.includes('没听懂') || userInput.includes('不理解')) {
           // 用户需要继续讲解，返回EXPLAIN状态
           nextState = 'EXPLAIN';
-          content = '好的，让我为你继续详细讲解这个知识点。';
+          
+          const reExplainPrompt = `学生表示没听懂"${this.currentSession.topic}"（${this.currentSession.subject}），请求重新讲解。
+请用更通俗易懂的语言，结合更多生活实例，重新讲解这个知识点。
+要求：
+1. 避免使用晦涩的专业术语，多用比喻
+2. 语言要亲切、自然
+3. 重点解释核心概念和原理
+4. 如果可能，换一个角度进行讲解`;
+
+          try {
+            content = await this.sendAIMessage(reExplainPrompt, onProgress);
+          } catch (error) {
+            console.error('[LearningFlowService] 生成重新讲解内容出错:', error);
+            content = '抱歉，生成讲解内容时出现问题，请稍后再试。';
+          }
+
           step.output = { 
             needMoreExplanation: true,
+            explanation: content,
             message: content
           };
           data = { 
@@ -630,7 +641,7 @@ ${materialsContent}
 - 重点内容使用**加粗**标记`;
 
           try {
-            content = await this.sendAIMessage(outlinePrompt);
+            content = await this.sendAIMessage(outlinePrompt, onProgress);
           } catch (error) {
             console.error('[LearningFlowService] 生成知识大纲出错:', error);
             content = `# ${this.currentSession.topic} 知识大纲
@@ -844,8 +855,8 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
   // 对话服务实例
   const conversationService = ConversationService.getInstance();
 
-  // 从savedItems中智能提取主题和学科
-  const extractTopicAndSubject = (items: LearningStep[]): { topic: string; subject: string } => {
+  // 从savedItems中智能提取主题和学科 - memoized to avoid recalculating on every render
+  const extractTopicAndSubject = useCallback((items: LearningStep[]): { topic: string; subject: string } => {
     if (!items || items.length === 0) {
       return { topic: '', subject: '数学' };
     }
@@ -977,11 +988,11 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
       }
     }
 
-    return { 
-      topic: extractedTopic || '', 
-      subject: extractedSubject 
+    return {
+      topic: extractedTopic || '',
+      subject: extractedSubject
     };
-  };
+  }, []);
 
   // 组件初始化时提取主题和学科
   React.useEffect(() => {
@@ -1137,6 +1148,11 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
     }
     
     setIsProcessing(true);
+    // 重置内容，准备接收新流
+    if (!userInput.trim()) {
+       setStepContent(''); 
+    }
+
     try {
       // 如果有用户输入，先保存用户消息
       if (userInput.trim() && conversationHistory) {
@@ -1147,7 +1163,17 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
         await conversationService.addMessage(conversationHistory.id, userMessage);
       }
       
-      const result = await learningService.nextStep(sessionToUse.id, step, userInput);
+      const result = await learningService.nextStep(
+        sessionToUse.id, 
+        step, 
+        userInput, 
+        false, 
+        (chunk) => {
+            // 实时更新UI
+            setStepContent(chunk);
+        }
+      );
+      
       setStepContent(result.content);
       setStepData(result.data);
       setCurrentStep(result.nextState);
@@ -1214,7 +1240,7 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
             quizQuestions,
             userAnswers: userAnswersNormalized,
             finalScore: (quizResult as any).score,
-            stats: quizResult?.score ? { accuracy: quizResult.score, totalQuestions: quizResult.totalQuestions, correctAnswers: quizResult.correctCount } : undefined,
+            stats: quizResult?.score ? { conversationId: conversationHistory.id, accuracy: quizResult.score, totalQuestions: quizResult.totalQuestions, correctAnswers: quizResult.correctCount } : undefined,
           };
           
           await LearningProgressClient.saveLearningProgress(progressData);
@@ -1314,6 +1340,79 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
     }
   };
 
+  // 手动保存学习进度
+   const handleManualSave = async () => {
+     if (!session || !conversationHistory) {
+       toast.error('无法保存：会话未初始化');
+       return;
+     }
+
+     setIsProcessing(true);
+     try {
+       // 汇总测验题目与答案（如果有）
+       const quizStep = learningService.getCurrentSession()?.steps.find(s => s.step === 'QUIZ' && s.output?.questions);
+       const quizQuestions = quizStep?.output?.questions || [];
+       const quizResult = quizStep?.output?.quizResult || {};
+       const userAnswersRaw = Array.isArray((quizResult as any).userAnswers) ? (quizResult as any).userAnswers : undefined;
+       const userAnswersNormalized = userAnswersRaw && quizQuestions.length
+         ? userAnswersRaw.map((ans: any, idx: number) => {
+             const q = quizQuestions[idx] || {};
+             const ua = typeof ans === 'object' ? (ans.userAnswer ?? ans) : ans;
+             const isCorrect = ua === q.correctAnswer;
+             return {
+               questionId: String(q.id ?? (idx + 1)),
+               userAnswer: String(ua ?? ''),
+               isCorrect,
+               score: isCorrect ? (q.points || 10) : 0,
+             };
+           })
+         : undefined;
+ 
+       // 规范化题目以符合后端类型要求
+       const quizQuestionsPayload = Array.isArray(quizQuestions)
+         ? quizQuestions.map((q: any, idx: number) => ({
+             question: String(q.question ?? ''),
+             type: String(q.type ?? 'multiple_choice'),
+             options: Array.isArray(q.options) ? q.options.map((o: any) => String(o)) : undefined,
+             correctAnswer: String(q.correctAnswer ?? ''),
+             explanation: q.explanation ? String(q.explanation) : undefined,
+             difficulty: q.difficulty ? String(q.difficulty) : 'medium',
+             points: typeof q.points === 'number' ? q.points : 1,
+             order: typeof q.order === 'number' ? q.order : (idx + 1),
+           }))
+         : [];
+
+       const progressData = {
+         conversationId: conversationHistory.id,
+         subject: session.subject,
+         topic: session.topic,
+         region: selectedRegion,
+         grade: grade,
+         aiExplanation: currentStep === 'EXPLAIN' ? stepContent : (session.steps.find(s => s.step === 'EXPLAIN')?.output?.explanation || ''),
+         socraticDialogue: conversationHistory.messages || [],
+         currentStep: currentStep,
+         isCompleted: currentStep === 'DONE',
+         quizQuestions: quizQuestionsPayload,
+         userAnswers: userAnswersNormalized,
+         finalScore: (quizResult as any).score,
+         stats: quizResult?.score ? { 
+           conversationId: conversationHistory.id,
+           accuracy: quizResult.score, 
+           totalQuestions: quizResult.totalQuestions, 
+           correctAnswers: quizResult.correctCount 
+         } : undefined,
+       };
+       
+       await LearningProgressClient.saveLearningProgress(progressData);
+       toast.success('学习进度已保存');
+     } catch (error) {
+       console.error('手动保存学习进度失败:', error);
+       toast.error('保存失败: ' + (error instanceof Error ? error.message : '未知错误'));
+     } finally {
+       setIsProcessing(false);
+     }
+   };
+
   // 渲染当前步骤
   const renderCurrentStep = () => {
     if (!session) return null;
@@ -1327,7 +1426,7 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
             onAskQuestion={(question: string) => {
               setIsProcessing(true);
               // 调用nextStep方法，传递isQuestion=true标识这是一个提问
-              learningService.nextStep(session.id, 'EXPLAIN', question, true)
+              learningService.nextStep(session.id, 'EXPLAIN', question, true, (chunk) => setStepContent(chunk))
                 .then(result => {
                   setStepContent(result.content);
                   setStepData(result.data);
@@ -1444,6 +1543,8 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
               setCurrentAnswer('');
               setQuestionCount(0);
             }}
+            session={session} // 传递 session
+            grade={grade}     // 传递 grade
           />
         );
       default:
@@ -1550,12 +1651,25 @@ const LearningSessionComponent: React.FC<LearningSessionProps> = ({ savedItems, 
               <h2 className="text-lg font-bold text-yellow-400">
                 {session.subject} - {session.topic}
               </h2>
-              <button
-                onClick={handleExit}
-                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700"
-              >
-                退出
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleManualSave}
+                  disabled={isProcessing}
+                  className={`px-3 py-1 rounded text-white ${
+                    isProcessing 
+                      ? 'bg-blue-800 cursor-not-allowed' 
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                >
+                  {isProcessing ? '保存中...' : '保存进度'}
+                </button>
+                <button
+                  onClick={handleExit}
+                  className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700"
+                >
+                  退出
+                </button>
+              </div>
             </div>
             <div className="mt-2 text-sm text-white">
               当前阶段: {

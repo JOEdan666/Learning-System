@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import LearningProgressService from '@/app/services/learningProgressService';
-import { PrismaClient } from '@/app/generated/prisma';
-const prisma = new PrismaClient();
+import { prisma } from '@/app/lib/prisma';
 
 // GET - 获取学习进度
 export async function GET(request: NextRequest) {

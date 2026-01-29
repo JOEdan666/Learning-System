@@ -193,6 +193,16 @@ export class ConversationService {
     if (index === -1) return null;
 
     const conversation = conversations[index];
+    
+    // 防止重复添加相同的消息（简单的去重逻辑）
+    const lastMessage = conversation.messages[conversation.messages.length - 1];
+    if (lastMessage && 
+        lastMessage.role === message.role && 
+        lastMessage.content === message.content) {
+      console.log('检测到重复消息，跳过添加');
+      return conversation;
+    }
+
     conversation.messages.push(message);
     conversation.messageCount = conversation.messages.length;
     conversation.updatedAt = new Date();
@@ -295,7 +305,9 @@ export class ConversationService {
       }
 
       // 普通对话使用AI生成标题
-      if (!this.aiProvider) {
+      // 使用独立的 Provider 实例，避免与主 Provider 冲突
+      const tempProvider = createProviderFromEnv();
+      if (!tempProvider) {
         throw new Error('AI Provider 未初始化');
       }
 
@@ -304,15 +316,16 @@ export class ConversationService {
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n');
 
-      const prompt = `请基于以下对话内容，生成一个简洁精炼的对话标题（不超过15个字）：
+      const prompt = `请基于以下对话内容，生成一个简洁精炼的对话标题（不超过10个字）：
 
 ${conversationContent}
 
 要求：
 1. 标题要能概括对话的主要内容
-2. 简洁明了，不超过10个字
+2. 简洁明了，尽量不超过10个字
 3. 避免使用"关于"、"讨论"等冗余词汇
-4. 直接返回标题，不要其他解释
+4. 直接返回标题文本，不要包含任何标点符号或重复内容
+5. 不要重复输出标题
 
 标题：`;
 
@@ -321,11 +334,32 @@ ${conversationContent}
         let fullResponse = '';
         
         // 设置消息处理器
-        this.aiProvider!.onMessage((message: string, isFinal: boolean) => {
+        tempProvider.onMessage((message: string, isFinal: boolean) => {
           fullResponse += message;
           if (isFinal) {
             // 消息完成
-            const title = fullResponse.trim().replace(/^标题：?/, '').trim();
+            let title = fullResponse.trim().replace(/^标题[：:]\s*/, '').trim();
+            
+            // 简单的去重逻辑：如果标题看起来像重复的字符串（如 "ABCABC"），则尝试修复
+            if (title.length > 4) {
+              // 1. 检查完全重复 (ABCABC)
+              if (title.length % 2 === 0) {
+                const halfLen = title.length / 2;
+                const firstHalf = title.substring(0, halfLen);
+                const secondHalf = title.substring(halfLen);
+                if (firstHalf === secondHalf) {
+                  title = firstHalf;
+                }
+              }
+              
+              // 2. 检查模式重复 (AABBAABB) 或其他重复
+              // 使用正则匹配连续重复的子串 (长度至少为2)
+              title = title.replace(/(.{2,})\1+/g, '$1');
+            }
+            
+            // 关闭临时 Provider
+            tempProvider.close();
+            
             resolve({
               title: title || '新对话',
               confidence: 0.8
@@ -334,8 +368,9 @@ ${conversationContent}
         });
         
         // 设置错误处理器
-        this.aiProvider!.onError((error: string) => {
+        tempProvider.onError((error: string) => {
           console.error('生成标题失败:', error);
+          tempProvider.close();
           resolve({
             title: request.type === 'learning' ? '系统化学习' : '新对话',
             confidence: 0.5
@@ -343,7 +378,7 @@ ${conversationContent}
         });
         
         // 发送消息
-        this.aiProvider!.sendMessage(prompt);
+        tempProvider.sendMessage(prompt);
       });
     } catch (error) {
       console.error('生成标题失败:', error);
