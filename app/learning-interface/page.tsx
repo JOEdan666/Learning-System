@@ -891,6 +891,7 @@ function LearningInterfaceContent() {
                 learningDuration={Math.floor((Date.now() - (lastSaveTime || Date.now())) / 60000) || 25}
                 onAiSummaryGenerated={(summary) => setAiSummary(summary)}
                 conversationId={conversationId || undefined}
+                grade={grade}
               />
             )}
           </div>
