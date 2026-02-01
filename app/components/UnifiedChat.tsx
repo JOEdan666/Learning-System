@@ -65,7 +65,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [providerName, setProviderName] = useState<'openai' | 'xunfei' | 'unknown'>('unknown');
   const [health, setHealth] = useState<{ provider: string; hasOpenAIKey: boolean; hasXunfei: boolean } | null>(null);
-  const preferredProvider = (process.env.NEXT_PUBLIC_AI_PROVIDER || 'xunfei').toLowerCase();
+  const preferredProvider = (process.env.NEXT_PUBLIC_AI_PROVIDER || 'openai').toLowerCase();
 
   // 引用当前选中的对话，解决闭包问题
   const selectedConversationRef = useRef(selectedConversation);

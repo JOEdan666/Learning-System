@@ -1,29 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-// 绕过单例，强制使用新实例以解决开发环境Schema缓存问题
+import { cookies } from 'next/headers';
+import { randomUUID } from 'crypto';
+// 绕过单例，强制使用新实例以解决开发环境 Schema 缓存问题
 import { PrismaClient } from '@/app/generated/prisma';
 import { memoryDB } from '@/app/lib/memory-db';
 
 const prisma = new PrismaClient();
 
+// 允许在数据库或鉴权不可用时回退；生产环境也默认开启
+const MEMORY_FALLBACK_ENABLED =
+  (process.env.ENABLE_MEMORY_DB_FALLBACK || 'true').toLowerCase() === 'true';
+
+// 判断数据库不可用的特征错误
+const isDbUnavailable = (error: any) =>
+  error?.message?.includes('does not exist') ||
+  error?.code === 'P2010' ||
+  error?.message?.includes('Connection');
+
+// 统一解析用户：优先 Clerk，失败则使用 guest cookie
+const resolveUser = async (req: NextRequest) => {
+  let userId: string | null = null;
+  let shouldSetCookie = false;
+
+  try {
+    const authData = await auth();
+    userId = authData.userId;
+  } catch (e) {
+    console.warn('Clerk auth failed:', e);
+  }
+
+  if (!userId) {
+    const store = cookies();
+    const guest = store.get('guest_id');
+    if (guest?.value) {
+      userId = guest.value;
+    } else {
+      userId = `guest-${randomUUID()}`;
+      shouldSetCookie = true;
+    }
+  }
+
+  return { userId, shouldSetCookie };
+};
+
+const respond = (payload: any, shouldSetCookie: boolean, userId: string) => {
+  const res = NextResponse.json(payload);
+  if (shouldSetCookie) {
+    res.cookies.set('guest_id', userId, {
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 180, // 180 天
+      path: '/',
+    });
+  }
+  return res;
+};
+
 export async function GET(req: NextRequest) {
   try {
-    let userId: string | null = null;
-    
-    // 尝试获取用户ID，捕获所有可能的错误
-    try {
-      const authData = await auth();
-      userId = authData.userId;
-    } catch (e) {
-      console.warn('Clerk auth failed:', e);
-    }
-    
-    // 开发环境兜底：如果未登录，使用模拟用户ID
-    if (!userId && process.env.NODE_ENV === 'development') {
-      userId = 'mock-dev-user';
-      console.log('⚠️ 开发模式：使用模拟用户ID (GET)');
-    }
-
+    const { userId, shouldSetCookie } = await resolveUser(req);
     if (!userId) {
       return NextResponse.json({ error: '未授权' }, { status: 401 });
     }
@@ -35,15 +71,8 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const skip = (page - 1) * limit;
 
-    const where: any = {
-      userId,
-      isArchived: false,
-    };
-
-    if (type) {
-      where.type = type;
-    }
-
+    const where: any = { userId, isArchived: false };
+    if (type) where.type = type;
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
@@ -59,34 +88,38 @@ export async function GET(req: NextRequest) {
           orderBy: { lastActivity: 'desc' },
           skip,
           take: limit,
-          include: {
-            learningSession: true,
-          },
+          include: { learningSession: true },
         }),
         prisma.conversation.count({ where }),
       ]);
 
-      return NextResponse.json({
-        conversations,
-        total,
-        page,
-        limit,
-        hasMore: skip + conversations.length < total,
-      });
-    } catch (dbError: any) {
-      // 数据库故障兜底
-      if (process.env.NODE_ENV === 'development' && 
-          (dbError.message?.includes('does not exist') || dbError.code === 'P2010')) {
-        console.warn('⚠️ [GET] 数据库不可用，切换至内存数据库');
-        const conversations = await memoryDB.getConversations(where);
-        return NextResponse.json({
+      return respond(
+        {
           conversations,
-          total: conversations.length,
-          page: 1,
-          limit: 100,
-          hasMore: false,
-          source: 'memory'
-        });
+          total,
+          page,
+          limit,
+          hasMore: skip + conversations.length < total,
+        },
+        shouldSetCookie,
+        userId,
+      );
+    } catch (dbError: any) {
+      if (MEMORY_FALLBACK_ENABLED && isDbUnavailable(dbError)) {
+        console.warn('⚠️ [GET] 数据库不可用，切换内存数据库');
+        const conversations = await memoryDB.getConversations(where);
+        return respond(
+          {
+            conversations,
+            total: conversations.length,
+            page: 1,
+            limit: 100,
+            hasMore: false,
+            source: 'memory',
+          },
+          shouldSetCookie,
+          userId,
+        );
       }
       throw dbError;
     }
@@ -96,42 +129,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// 检查是否是数据库不可用错误
-const isDbUnavailable = (error: any) => {
-  return process.env.NODE_ENV === 'development' && (
-    error?.message?.includes('does not exist') ||
-    error?.code === 'P2010' ||
-    error?.message?.includes('Connection')
-  );
-};
-
 export async function POST(req: NextRequest) {
-  // 先读取 body，避免多次读取流
   const body = await req.json();
   const { title, type, initialMessage, subject, topic, aiExplanation, learningSession } = body;
 
   try {
-    let userId: string | null = null;
-
-    // 尝试获取用户ID，捕获所有可能的错误
-    try {
-      const authData = await auth();
-      userId = authData.userId;
-    } catch (e) {
-      console.warn('Clerk auth failed:', e);
-    }
-
-    // 开发环境兜底：如果未登录，使用模拟用户ID
-    if (!userId && process.env.NODE_ENV === 'development') {
-      userId = 'mock-dev-user';
-      console.log('⚠️ 开发模式：使用模拟用户ID (POST)');
-    }
-
+    const { userId, shouldSetCookie } = await resolveUser(req);
     if (!userId) {
       return NextResponse.json({ error: '未授权' }, { status: 401 });
     }
 
-    // 准备创建数据 - 提前定义以便在 catch 中也能访问
     const messages = initialMessage ? [initialMessage] : [];
     const createData: any = {
       userId,
@@ -144,7 +151,6 @@ export async function POST(req: NextRequest) {
       aiExplanation,
     };
 
-    // 如果有 learningSession 数据，同时创建
     if (learningSession) {
       createData.learningSession = {
         create: {
@@ -153,26 +159,18 @@ export async function POST(req: NextRequest) {
           topic: learningSession.topic || topic,
           currentStep: learningSession.currentStep || 'DIAGNOSE',
           isCompleted: false,
-        }
+        },
       };
     }
 
-    // 如果是学习类型，检查是否已存在
+    // 学习型对话去重
     if (type === 'learning' && subject && topic) {
       try {
         const existing = await prisma.conversation.findFirst({
-          where: {
-            userId,
-            type: 'learning',
-            subject,
-            topic,
-            isArchived: false,
-          },
+          where: { userId, type: 'learning', subject, topic, isArchived: false },
           include: { learningSession: true },
         });
-
         if (existing) {
-          // 更新现有对话
           const updated = await prisma.conversation.update({
             where: { id: existing.id },
             data: {
@@ -181,33 +179,32 @@ export async function POST(req: NextRequest) {
               aiExplanation: aiExplanation || existing.aiExplanation,
               messages: initialMessage
                 ? [...((existing.messages as any[]) || []), initialMessage]
-                : (existing.messages || []),
+                : existing.messages || [],
               messageCount: initialMessage
                 ? (existing.messageCount || 0) + 1
                 : existing.messageCount,
             },
             include: { learningSession: true },
           });
-          return NextResponse.json(updated);
+          return respond(updated, shouldSetCookie, userId);
         }
       } catch (dbError: any) {
-        if (isDbUnavailable(dbError)) {
-          console.warn('⚠️ [POST-Check] 数据库不可用，使用内存数据库检查');
-          // 在内存数据库中检查是否已存在
-          const memConversations = await memoryDB.getConversations({ userId, type: 'learning' });
-          const existing = memConversations.find((c: any) => c.subject === subject && c.topic === topic);
-          if (existing) {
-            const updated = await memoryDB.updateConversation(existing.id, {
-              messages: initialMessage
-                ? [...(existing.messages || []), initialMessage]
-                : existing.messages,
-              aiExplanation: aiExplanation || existing.aiExplanation,
-            }, userId);
-            return NextResponse.json(updated);
-          }
-          // 不存在则继续创建流程
-        } else {
+        if (!(MEMORY_FALLBACK_ENABLED && isDbUnavailable(dbError))) {
           throw dbError;
+        }
+        console.warn('⚠️ [POST-Check] DB 不可用，改用内存检查');
+        const memConvs = await memoryDB.getConversations({ userId, type: 'learning' });
+        const existing = memConvs.find((c: any) => c.subject === subject && c.topic === topic);
+        if (existing) {
+          const updated = await memoryDB.updateConversation(
+            existing.id,
+            {
+              messages: initialMessage ? [...(existing.messages || []), initialMessage] : existing.messages,
+              aiExplanation: aiExplanation || existing.aiExplanation,
+            },
+            userId,
+          );
+          return respond(updated, shouldSetCookie, userId);
         }
       }
     }
@@ -217,21 +214,23 @@ export async function POST(req: NextRequest) {
         data: createData,
         include: { learningSession: true },
       });
-      return NextResponse.json(conversation);
+      return respond(conversation, shouldSetCookie, userId);
     } catch (dbError: any) {
-      if (isDbUnavailable(dbError)) {
-        console.warn('🚨 [POST] 数据库不可用，使用内存数据库创建');
+      if (MEMORY_FALLBACK_ENABLED && isDbUnavailable(dbError)) {
+        console.warn('🚨 [POST] DB 不可用，使用内存数据库');
         const conversation = await memoryDB.createConversation(createData);
-        console.log('✅ [POST] 内存数据库创建成功:', conversation.id);
-        return NextResponse.json(conversation);
+        return respond(conversation, shouldSetCookie, userId);
       }
       throw dbError;
     }
   } catch (error: any) {
     console.error('创建对话失败:', error);
-    return NextResponse.json({
-      error: '创建对话失败',
-      details: error?.message || String(error),
-    }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: '创建对话失败',
+        details: error?.message || String(error),
+      },
+      { status: 500 },
+    );
   }
 }
