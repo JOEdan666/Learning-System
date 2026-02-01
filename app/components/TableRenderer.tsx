@@ -115,27 +115,51 @@ const Table: React.FC<{ data: TableData }> = ({ data }) => {
 
 // 简易代码渲染组件集
 const mdComponents = {
-  code: ({ inline, className, children, ...props }: any) => {
-    const match = /language-(\w+)/.exec(className || '')
-    const lang = match?.[1] || ''
-    if (inline) {
-      return <code className="bg-gray-100 text-red-500 rounded px-1.5 py-0.5 font-mono text-[0.9em]" {...props}>{children}</code>
+  // pre 组件处理代码块（包含 code 子元素的情况）
+  pre: ({ children, ...props }: any) => {
+    // 提取 code 子元素的信息
+    const codeChild = React.Children.toArray(children).find(
+      (child: any) => child?.type === 'code' || child?.props?.node?.tagName === 'code'
+    ) as React.ReactElement | undefined;
+
+    if (codeChild && codeChild.props) {
+      const className = codeChild.props.className || '';
+      const match = /language-(\w+)/.exec(className);
+      const lang = match?.[1] || '';
+      const text = String(codeChild.props.children || '').replace(/\n$/, '');
+      const copy = () => navigator.clipboard?.writeText(text).catch(() => {});
+
+      return (
+        <div className="relative group my-4 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-500">
+            <span className="font-mono uppercase">{lang || 'TEXT'}</span>
+            <button type="button" onClick={copy} className="hover:text-blue-600 transition-colors">复制</button>
+          </div>
+          <div className="bg-white p-4 overflow-x-auto">
+            <pre className="text-sm font-mono text-gray-800 leading-relaxed m-0 whitespace-pre-wrap">
+              <code>{text}</code>
+            </pre>
+          </div>
+        </div>
+      );
     }
-    const text = String(children || '')
-    const copy = () => navigator.clipboard?.writeText(text).catch(()=>{})
+
+    // 如果不是代码块，使用默认渲染
+    return <pre {...props}>{children}</pre>;
+  },
+  // code 组件仅处理内联代码（不在 pre 中的情况）
+  code: ({ className, children, ...props }: any) => {
+    // react-markdown v10+ 不再传递 inline 属性
+    // 内联代码会直接渲染 code 元素，而代码块会先渲染 pre 再嵌套 code
+    // 因此这里只处理内联代码的样式
     return (
-      <div className="relative group my-4 rounded-lg overflow-hidden border border-gray-200 shadow-sm">
-        <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200 text-xs text-gray-500">
-          <span className="font-mono uppercase">{lang || 'TEXT'}</span>
-          <button type="button" onClick={copy} className="hover:text-blue-600 transition-colors">复制</button>
-        </div>
-        <div className="bg-white p-4 overflow-x-auto">
-           <pre className="text-sm font-mono text-gray-800 leading-relaxed m-0">
-             <code>{children}</code>
-           </pre>
-        </div>
-      </div>
-    )
+      <code
+        className="bg-gray-100 text-red-500 rounded px-1.5 py-0.5 font-mono text-[0.9em]"
+        {...props}
+      >
+        {children}
+      </code>
+    );
   },
   // 自定义其他 Markdown 元素样式
   p: ({ children }: any) => <p className="mb-4 last:mb-0 leading-7 text-gray-800">{children}</p>,
