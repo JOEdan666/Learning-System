@@ -163,7 +163,7 @@ export default function ExplainStep({
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20 h-full">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
-            <p className="text-slate-600 font-medium">AI 老师正在为你准备专属讲解...</p>
+            <p className="text-slate-600 font-medium">专属私教正在为你准备讲解...</p>
             <p className="text-slate-400 text-sm mt-2">分析错题原因 · 提炼核心考点 · 生成通俗解释</p>
           </div>
         ) : (

@@ -7,7 +7,7 @@ import { ConversationService } from '../services/conversationService';
 import { ChatMessage } from '../utils/chatTypes';
 import { SUBJECTS, LearningItem } from '../types';
 import { toast } from 'react-hot-toast';
-import { createProviderFromEnv } from '../services/ai';
+import { createProvider, createProviderFromEnv } from '../services/ai';
 import type { AIProvider } from '../services/ai';
 import type { ChatMessage as AIChatMessage } from '../services/ai/types';
 import { KnowledgeBaseService, type KBItem } from '../services/knowledgeBaseService'
@@ -63,6 +63,9 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
   const [kbService] = useState(() => new KnowledgeBaseService())
   const userScrollingRef = useRef(false); // 追踪用户是否正在滚动
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [providerName, setProviderName] = useState<'openai' | 'xunfei' | 'unknown'>('unknown');
+  const [health, setHealth] = useState<{ provider: string; hasOpenAIKey: boolean; hasXunfei: boolean } | null>(null);
+  const preferredProvider = (process.env.NEXT_PUBLIC_AI_PROVIDER || 'xunfei').toLowerCase();
 
   // 引用当前选中的对话，解决闭包问题
   const selectedConversationRef = useRef(selectedConversation);
@@ -173,6 +176,14 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
   // 发送消息
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || !selectedConversation || isLoading || !aiProviderRef.current) return;
+    if (providerName === 'openai' && health && !health.hasOpenAIKey) {
+      toast.error('OpenAI API Key 未配置，无法发送。请在服务器环境变量中设置 OPENAI_API_KEY。');
+      return;
+    }
+    if (providerName === 'xunfei' && health && !health.hasXunfei) {
+      toast.error('讯飞凭证未配置，无法发送。请补齐 NEXT_PUBLIC_XUNFEI_* 环境变量。');
+      return;
+    }
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -303,9 +314,9 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
     const subjects = Object.keys(bySubject);
     if (subjects.length === 0) return null;
     const parts: string[] = [];
-    parts.push('你是我的学习助理。回答问题时优先基于下列知识库内容；若知识库没有相关信息，请明确说明并再进行通用回答：');
+    parts.push('【重要指令】你是专属私教。严禁使用任何开场白或前缀，包括但不限于："根据知识库"、"根据资料"、"基于提供的内容"、"好的"、"让我来"、"首先"等。直接进入正题，用简洁清晰的语言回答问题。可融合下方参考资料，若资料不足则用通用知识作答。');
     for (const s of subjects) {
-      parts.push(`【${s}】`);
+      parts.push(`【${s === '知识库' ? '参考资料' : s}】`);
       const lines = bySubject[s].map((t, idx) => `${idx + 1}. ${t}`);
       parts.push(lines.join('\n'));
     }
@@ -313,10 +324,64 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
   }, []);
 
   // 初始化AI Provider（仅初始化一次，避免重复注册导致多次回调）
+  // 更强大的前缀过滤，覆盖AI可能使用的各种变体
+  const stripKnowledgePrefix = useCallback((content: string) => {
+    if (!content) return '';
+    // 多种前缀模式依次过滤
+    const patterns = [
+      /^(根据|基于|依据|参考|结合|综合)?(你的|本|提供的|上述|以上|给定的|所给的|已有的|现有的)?(知识库|资料|内容|信息|材料|文档|参考资料)[，,、:：]?\s*/gi,
+      /^(从|按照|通过)?(你的|本|提供的)?(知识库|资料)[来]?(来看|分析|了解|可知)[，,、:：]?\s*/gi,
+      /^好的[，,]?\s*/gi,
+      /^(让我|我来|我将|我会)(为你|帮你|给你)?[，,]?\s*/gi,
+      /^(首先|接下来)[，,]?\s*/gi,
+    ];
+    let result = content;
+    for (const pattern of patterns) {
+      result = result.replace(pattern, '');
+    }
+    return result.trim();
+  }, []);
+
   useEffect(() => {
-    const provider = createProviderFromEnv();
-    if (provider) {
-      aiProviderRef.current = provider;
+    const initProvider = async () => {
+      try {
+        const res = await fetch('/api/ai/health', { cache: 'no-store' });
+        const json = await res.json();
+        setHealth(json);
+
+        let provider: AIProvider | null = null;
+        let finalProvider: 'openai' | 'xunfei' | 'unknown' = 'unknown';
+
+        if (preferredProvider === 'openai') {
+          if (json.hasOpenAIKey) {
+            provider = createProvider({ provider: 'openai' });
+            finalProvider = 'openai';
+          } else if (json.hasXunfei) {
+            provider = createProvider({
+              provider: 'xunfei',
+              xunfei: {
+                appId: process.env.NEXT_PUBLIC_XUNFEI_APP_ID || '',
+                apiKey: process.env.NEXT_PUBLIC_XUNFEI_API_KEY || '',
+                apiSecret: process.env.NEXT_PUBLIC_XUNFEI_API_SECRET || '',
+                domain: process.env.NEXT_PUBLIC_XUNFEI_DOMAIN || 'generalv3.5',
+                apiUrl: process.env.NEXT_PUBLIC_XUNFEI_API_URL || 'wss://spark-api.xf-yun.com/v3.5/chat',
+              }
+            });
+            finalProvider = 'xunfei';
+            toast('OpenAI 未就绪，已自动切换到讯飞通道', { icon: '🚦' });
+          }
+        } else {
+          provider = createProviderFromEnv();
+          finalProvider = provider ? (preferredProvider === 'xunfei' ? 'xunfei' : 'unknown') : 'unknown';
+        }
+
+        if (!provider) {
+          toast.error('未检测到可用的 AI 凭证，请检查环境变量');
+          return;
+        }
+
+        aiProviderRef.current = provider;
+        setProviderName(finalProvider);
 
       // 设置消息处理器
       provider.onMessage(async (content: string, isFinal: boolean) => {
@@ -324,7 +389,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
         
         setMessages(prev => {
           const lastMessage = prev[prev.length - 1];
-          const validContent = content || '';
+          const validContent = stripKnowledgePrefix(content || '');
           
           // 避免在最终空内容事件或空增量时创建空消息
           if (validContent.length === 0 && (!lastMessage || lastMessage.role !== 'assistant')) {
@@ -341,7 +406,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
             return [...prev.slice(0, -1), updatedMessage];
           } else {
              // 添加新的助手消息
-             const newMessage: ChatMessage = { role: 'assistant', content: validContent };
+             const newMessage: ChatMessage = { role: 'assistant', content: stripKnowledgePrefix(validContent) };
              return [...prev, newMessage];
            }
         });
@@ -424,7 +489,13 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
         toast.error('AI回复失败');
         setIsLoading(false);
       });
-    }
+      } catch (e) {
+        console.error('初始化AI Provider失败', e);
+        toast.error('AI通道初始化失败，请检查配置');
+      }
+    };
+
+    initProvider();
 
     // 组件卸载时关闭连接
     return () => {
@@ -432,7 +503,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
         aiProviderRef.current.close();
       }
     };
-  }, []);
+  }, [preferredProvider, stripKnowledgePrefix]);
 
   // 加载对话列表
   useEffect(() => {
@@ -462,75 +533,84 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
     prevMessagesLengthRef.current = messages.length;
   }, [messages.length, scrollToBottom]);
 
-  // UI渲染重构
+  // UI渲染 - 浅蓝色现代化风格
   return (
-    <div className="flex h-[calc(100vh-64px)] bg-white overflow-hidden">
+    <div className="flex h-[calc(100vh-64px)] bg-gradient-to-br from-sky-50 via-sky-100/50 to-blue-100 overflow-hidden">
+      {/* 装饰性背景元素 */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-20 left-[10%] w-72 h-72 bg-blue-200/30 rounded-full blur-3xl" />
+        <div className="absolute bottom-20 right-[15%] w-96 h-96 bg-sky-200/40 rounded-full blur-3xl" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(59,130,246,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(59,130,246,0.03)_1px,transparent_1px)] bg-[size:60px_60px]" />
+      </div>
+
       {/* 移动端遮罩 */}
       {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm z-20 lg:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
 
-      {/* 左侧对话列表 (侧边栏) - 已现代化为浅色风格 */}
-      <div 
+      {/* 左侧对话列表 (侧边栏) - 浅色毛玻璃风格 */}
+      <div
         className={`
-          fixed inset-y-0 left-0 z-30 w-[260px] bg-gray-50 text-gray-700 border-r border-gray-200 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0
+          fixed inset-y-0 left-0 z-30 w-[280px] bg-white/80 backdrop-blur-xl border-r border-blue-100 shadow-xl shadow-blue-100/20 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-          ${!isSidebarOpen && 'lg:hidden'} 
+          ${!isSidebarOpen && 'lg:hidden'}
         `}
       >
         <div className="flex flex-col h-full overflow-hidden">
-          {/* 侧边栏头部 - 固定高度 */}
-          <div className="shrink-0 p-3">
+          {/* 侧边栏头部 */}
+          <div className="shrink-0 p-4 border-b border-blue-100/50">
             <button
               onClick={() => {
                 setShowNewChatForm(true);
                 if (window.innerWidth < 1024) setIsSidebarOpen(false);
               }}
-              className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-gray-700 bg-white hover:bg-gray-100 rounded-lg transition-colors border border-gray-200 shadow-sm"
+              className="w-full flex items-center justify-between px-4 py-3 text-sm text-gray-700 bg-gradient-to-r from-blue-50 to-sky-50 hover:from-blue-100 hover:to-sky-100 rounded-xl transition-all border border-blue-200/50 shadow-sm hover:shadow-md"
             >
-              <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                <span className="font-medium">新对话</span>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-sky-500 flex items-center justify-center shadow-md shadow-blue-200">
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                </div>
+                <span className="font-semibold">新对话</span>
               </div>
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
             </button>
           </div>
 
-          {/* 新对话表单 (嵌入在侧边栏) */}
+          {/* 新对话表单 */}
           {showNewChatForm && (
-            <div className="shrink-0 px-3 pb-3 border-b border-gray-200">
-              <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-3 shadow-sm">
-                <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">创建新对话</h3>
-                
+            <div className="shrink-0 px-4 py-3 border-b border-blue-100/50 bg-gradient-to-b from-white to-sky-50/50">
+              <div className="bg-white rounded-xl p-4 space-y-4 shadow-lg shadow-blue-100/30 border border-blue-100">
+                <h3 className="text-sm font-semibold text-gray-800">创建新对话</h3>
+
                 {/* 类型切换 */}
                 <div className="flex bg-gray-100 p-1 rounded-lg">
                   <button
                     onClick={() => setChatType('general')}
-                    className={`flex-1 py-1.5 text-xs rounded-md transition-all ${chatType === 'general' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
+                    className={`flex-1 py-2 text-sm rounded-md transition-all font-medium ${chatType === 'general' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                   >
-                    普通
+                    普通对话
                   </button>
                   <button
                     onClick={() => setChatType('learning')}
-                    className={`flex-1 py-1.5 text-xs rounded-md transition-all ${chatType === 'learning' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
+                    className={`flex-1 py-2 text-sm rounded-md transition-all font-medium ${chatType === 'learning' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                   >
-                    学习
+                    系统学习
                   </button>
                 </div>
 
                 {chatType === 'learning' && (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <select
                       value={selectedSubject}
                       onChange={(e) => setSelectedSubject(e.target.value)}
-                      className="w-full bg-gray-50 text-gray-900 text-xs border border-gray-200 rounded px-2 py-2 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      className="w-full bg-gray-50 text-gray-800 text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none"
                     >
                       <option value="">选择学科</option>
                       {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -539,41 +619,45 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
                       type="text"
                       value={learningTopic}
                       onChange={(e) => setLearningTopic(e.target.value)}
-                      placeholder="学习主题"
-                      className="w-full bg-gray-50 text-gray-900 text-xs border border-gray-200 rounded px-2 py-2 focus:ring-1 focus:ring-blue-500 focus:outline-none placeholder-gray-400"
+                      placeholder="输入学习主题..."
+                      className="w-full bg-gray-50 text-gray-800 text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none placeholder-gray-400"
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <select
                         value={selectedRegion}
                         onChange={(e) => setSelectedRegion(e.target.value)}
-                        className="w-full bg-gray-50 text-gray-900 text-xs border border-gray-200 rounded px-2 py-2 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                        className="w-full bg-gray-50 text-gray-800 text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none"
                       >
-                        <option value="">地区</option>
+                        <option value="">选择地区</option>
                         {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
                       </select>
                       <select
                         value={selectedGrade}
                         onChange={(e) => setSelectedGrade(e.target.value)}
-                        className="w-full bg-gray-50 text-gray-900 text-xs border border-gray-200 rounded px-2 py-2 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                        className="w-full bg-gray-50 text-gray-800 text-sm border border-gray-200 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 focus:outline-none"
                       >
-                        <option value="">年级</option>
+                        <option value="">选择年级</option>
                         {GRADES.map(g => <option key={g} value={g}>{g}</option>)}
                       </select>
                     </div>
                   </div>
                 )}
 
-                <div className="flex gap-2 pt-1">
-                  <button onClick={handleCreateNewChat} className="flex-1 bg-black text-white hover:bg-gray-800 text-xs py-2 rounded font-medium transition-colors">创建</button>
-                  <button onClick={() => setShowNewChatForm(false)} className="flex-1 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 text-xs py-2 rounded transition-colors">取消</button>
+                <div className="flex gap-3 pt-2">
+                  <button onClick={handleCreateNewChat} className="flex-1 bg-gradient-to-r from-blue-500 to-sky-500 text-white hover:from-blue-600 hover:to-sky-600 text-sm py-2.5 rounded-lg font-semibold transition-all shadow-lg shadow-blue-200 hover:shadow-xl">
+                    创建
+                  </button>
+                  <button onClick={() => setShowNewChatForm(false)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm py-2.5 rounded-lg font-medium transition-colors">
+                    取消
+                  </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 对话列表 - 确保稳定滚动 */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-2 pt-2 pb-0 flex flex-col gap-0.5 scrollbar-thin scrollbar-thumb-gray-300">
-            <div className="text-xs font-medium text-gray-400 px-3 py-2 shrink-0">最近</div>
+          {/* 对话列表 */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 pt-3 pb-0 flex flex-col gap-1">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 py-2 shrink-0">历史对话</div>
             {conversations.map((conversation) => (
               <div
                 key={conversation.id}
@@ -581,16 +665,22 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
                   handleSelectConversation(conversation);
                   if (window.innerWidth < 1024) setIsSidebarOpen(false);
                 }}
-                className={`group relative flex items-center gap-3 px-3 py-3 text-sm rounded-lg cursor-pointer transition-colors ${
-                  selectedConversation?.id === conversation.id 
-                    ? 'bg-gray-200 text-gray-900 font-medium' 
-                    : 'text-gray-700 hover:bg-gray-100'
+                className={`group relative flex items-center gap-3 px-3 py-3 text-sm rounded-xl cursor-pointer transition-all ${
+                  selectedConversation?.id === conversation.id
+                    ? 'bg-gradient-to-r from-blue-500 to-sky-500 text-white shadow-lg shadow-blue-200'
+                    : 'text-gray-700 hover:bg-blue-50 bg-white/50'
                 }`}
               >
-                <svg className={`w-4 h-4 shrink-0 ${selectedConversation?.id === conversation.id ? 'text-gray-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                </svg>
-                
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                  selectedConversation?.id === conversation.id
+                    ? 'bg-white/20'
+                    : 'bg-gradient-to-br from-blue-100 to-sky-100'
+                }`}>
+                  <svg className={`w-4 h-4 ${selectedConversation?.id === conversation.id ? 'text-white' : 'text-blue-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                  </svg>
+                </div>
+
                 {editingId === conversation.id ? (
                    <input
                     type="text"
@@ -600,31 +690,39 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
                     onKeyDown={handleRenameKeyDown}
                     onBlur={commitRename}
                     onClick={(e) => e.stopPropagation()}
-                    className="flex-1 bg-white text-gray-900 text-sm px-2 py-1 border border-blue-500 rounded focus:outline-none shadow-sm"
+                    className="flex-1 bg-white text-gray-800 text-sm px-3 py-1.5 border-2 border-blue-400 rounded-lg focus:outline-none shadow-sm"
                   />
                 ) : (
-                  <div className="flex-1 truncate pr-8">
+                  <div className="flex-1 truncate pr-8 font-medium">
                     {conversation.title}
                   </div>
                 )}
 
-                {/* 悬停操作按钮 (仅在非编辑模式显示) */}
+                {/* 悬停操作按钮 */}
                 {editingId !== conversation.id && (
                   <div className={`absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1 pl-4 ${
-                    selectedConversation?.id === conversation.id 
-                      ? 'bg-gradient-to-l from-gray-200 to-transparent' 
-                      : 'bg-gradient-to-l from-gray-100 to-transparent'
+                    selectedConversation?.id === conversation.id
+                      ? 'bg-gradient-to-l from-blue-500 to-transparent'
+                      : 'bg-gradient-to-l from-blue-50 to-transparent'
                   }`}>
-                    <button 
+                    <button
                       onClick={(e) => { e.stopPropagation(); startRename(conversation); }}
-                      className="p-1.5 hover:text-gray-900 text-gray-500 rounded hover:bg-gray-300 transition-colors"
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        selectedConversation?.id === conversation.id
+                          ? 'hover:bg-white/20 text-white'
+                          : 'hover:bg-blue-100 text-gray-500'
+                      }`}
                       title="重命名"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                     </button>
-                    <button 
+                    <button
                       onClick={(e) => { e.stopPropagation(); handleDeleteConversation(conversation.id); }}
-                      className="p-1.5 hover:text-red-500 text-gray-500 rounded hover:bg-gray-300 transition-colors"
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        selectedConversation?.id === conversation.id
+                          ? 'hover:bg-red-400/30 text-white'
+                          : 'hover:bg-red-100 text-red-500'
+                      }`}
                       title="删除"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -636,13 +734,13 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
           </div>
 
           {/* 侧边栏底部 */}
-          <div className="shrink-0 border-t border-gray-200 bg-gray-50">
-            <div className="flex items-center gap-3 px-4 py-2 text-sm text-gray-700">
-              <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center text-white font-bold text-xs shrink-0 shadow-sm">
+          <div className="shrink-0 border-t border-blue-100/50 bg-white/60 backdrop-blur">
+            <div className="flex items-center gap-3 px-4 py-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-sky-500 flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-lg shadow-blue-200">
                 U
               </div>
               <div className="flex flex-col">
-                <span className="font-medium text-gray-900">用户</span>
+                <span className="font-semibold text-gray-800">用户</span>
                 <span className="text-xs text-gray-500">学习者</span>
               </div>
             </div>
@@ -651,30 +749,30 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
       </div>
 
       {/* 主聊天区域 */}
-      <div className="flex-1 flex flex-col h-full relative">
-        {/* 顶部导航栏 (仅移动端或当侧边栏关闭时显示Toggle) */}
-        <div className="sticky top-0 z-10 flex items-center p-2 text-gray-500 bg-white border-b border-gray-100 lg:hidden">
-          <button 
+      <div className="flex-1 flex flex-col h-full relative z-10">
+        {/* 顶部导航栏 */}
+        <div className="sticky top-0 z-10 flex items-center p-3 bg-white/70 backdrop-blur-xl border-b border-blue-100/50 shadow-sm lg:hidden">
+          <button
             onClick={() => setIsSidebarOpen(true)}
-            className="p-2 hover:bg-gray-100 rounded-md"
+            className="p-2 hover:bg-blue-50 rounded-lg text-gray-600 transition-colors"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="ml-2 font-medium text-gray-700 truncate">
+          <span className="ml-3 font-semibold text-gray-800 truncate">
             {selectedConversation?.title || '新对话'}
           </span>
         </div>
 
-        {/* 桌面端侧边栏切换按钮 (悬浮) */}
+        {/* 桌面端侧边栏切换按钮 */}
         {!isSidebarOpen && (
-          <button 
+          <button
             onClick={() => setIsSidebarOpen(true)}
-            className="absolute top-4 left-4 z-10 p-2 text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100 hidden lg:block"
+            className="absolute top-4 left-4 z-10 p-2.5 text-gray-600 hover:text-blue-600 rounded-xl bg-white/80 backdrop-blur shadow-lg shadow-blue-100/30 hover:shadow-xl border border-blue-100 hidden lg:flex items-center justify-center transition-all"
             title="显示侧边栏"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
@@ -682,129 +780,171 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
 
         {selectedConversation ? (
           <>
+             {/* 对话信息栏 */}
+             <div className="px-4 pt-4">
+               <div className="max-w-4xl mx-auto flex flex-wrap items-center gap-2 text-xs">
+                 <span className="px-3 py-1.5 rounded-full bg-white/80 backdrop-blur border border-blue-100 text-gray-700 font-medium shadow-sm">
+                   {selectedConversation.title || '新对话'}
+                 </span>
+                 <span className={`px-3 py-1.5 rounded-full border font-medium flex items-center gap-1.5 ${
+                   providerName === 'unknown'
+                     ? 'border-gray-200 text-gray-500 bg-gray-50'
+                     : 'border-emerald-200 text-emerald-700 bg-emerald-50'
+                 }`}>
+                   {providerName !== 'unknown' && (
+                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                   )}
+                   {providerName === 'unknown' ? '未连接' : '专属私教在线'}
+                 </span>
+                 {health && providerName === 'unknown' && (
+                   <span className="px-3 py-1.5 rounded-full border border-rose-200 text-rose-600 bg-rose-50">
+                     请检查网络连接
+                   </span>
+                 )}
+               </div>
+             </div>
+
              {/* 消息滚动区域 */}
-            <div 
+            <div
               ref={messagesContainerRef}
               onScroll={handleScroll}
               className="flex-1 overflow-y-auto w-full scroll-smooth"
             >
-              <div className="flex flex-col items-center text-sm dark:bg-gray-800">
+              <div className="flex flex-col items-center text-sm">
                 {/* 顶部留白 */}
-                <div className="w-full h-10 shrink-0" />
-                
+                <div className="w-full h-6 shrink-0" />
+
                 {/* AI 讲解 (学习模式) */}
                 {selectedConversation.type === 'learning' && selectedConversation.aiExplanation && (
-                   <div className="w-full max-w-3xl px-4 md:px-6 mb-8">
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2 text-green-700 font-medium">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                   <div className="w-full max-w-3xl px-4 md:px-6 mb-6">
+                      <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-5 shadow-lg shadow-green-100/30">
+                        <div className="flex items-center gap-2 mb-3 text-green-700 font-semibold">
+                          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-md shadow-green-200">
+                            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          </div>
                           知识讲解
                         </div>
-                        <TableRenderer content={selectedConversation.aiExplanation} />
+                        <div className="text-gray-700">
+                          <TableRenderer content={selectedConversation.aiExplanation} />
+                        </div>
                       </div>
                    </div>
                 )}
 
-                {messages.map((message, index) => (
-                  <div
-                    key={index}
-                    className={`w-full text-gray-800 ${
-                      message.role === 'assistant' ? 'bg-gray-50' : 'bg-white'
-                    }`}
-                  >
-                    <div className="max-w-3xl mx-auto flex gap-4 p-4 md:py-6 lg:px-0 m-auto">
-                      {/* 头像 */}
-                      <div className="w-8 flex flex-col relative items-end">
-                        <div className={`
-                          relative h-8 w-8 rounded-sm flex items-center justify-center font-bold text-white shrink-0
-                          ${message.role === 'assistant' ? 'bg-green-500' : 'bg-blue-600'}
-                        `}>
-                          {message.role === 'assistant' ? (
-                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                          ) : 'U'}
-                        </div>
-                      </div>
-                      
-                      {/* 消息内容 */}
-                      <div className="relative flex-1 overflow-hidden">
-                        {/* 发送者名称 (可选) */}
-                        <div className="font-semibold text-sm mb-1 opacity-90">
-                           {message.role === 'assistant' ? 'AI 助教' : '你'}
-                        </div>
-                        
-                        <div className="min-h-[20px] break-words">
-                          {message.role === 'assistant' ? (
-                            <TableRenderer content={message.content} />
-                          ) : (
-                            <div className="whitespace-pre-wrap">{message.content}</div>
-                          )}
+                {messages.map((message, index) => {
+                  const sanitized = message.role === 'assistant' ? stripKnowledgePrefix(message.content) : message.content;
+                  const isUser = message.role === 'user';
+                  return (
+                    <div
+                      key={index}
+                      className="w-full px-4 mb-4"
+                    >
+                      <div className={`max-w-3xl mx-auto flex gap-4 ${isUser ? 'flex-row-reverse' : ''}`}>
+                        {/* 头像 */}
+                        <div className="shrink-0">
+                          <div className={`
+                            w-10 h-10 rounded-xl flex items-center justify-center font-bold text-white shadow-lg
+                            ${isUser
+                              ? 'bg-gradient-to-br from-blue-500 to-sky-500 shadow-blue-200'
+                              : 'bg-gradient-to-br from-emerald-500 to-green-500 shadow-green-200'
+                            }
+                          `}>
+                            {isUser ? (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                            ) : (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            )}
+                          </div>
                         </div>
 
-                        {/* 图片显示 */}
-                        {message.image && (
-                          <div className="mt-3">
-                            <img 
-                              src={message.image} 
-                              alt="Uploaded" 
-                              className="max-w-md rounded-lg shadow-sm border border-gray-200 cursor-zoom-in"
-                              onClick={() => window.open(message.image, '_blank')}
-                            />
+                        {/* 消息气泡 */}
+                        <div className={`flex-1 max-w-[85%] ${isUser ? 'text-right' : ''}`}>
+                          <div className="text-xs font-medium text-gray-500 mb-1.5 px-1">
+                             {isUser ? '你' : '专属私教'}
                           </div>
-                        )}
+                          <div className={`
+                            inline-block text-left px-5 py-4 rounded-2xl shadow-lg
+                            ${isUser
+                              ? 'bg-gradient-to-br from-blue-500 to-sky-500 text-white rounded-tr-sm shadow-blue-200'
+                              : 'bg-white/95 backdrop-blur text-gray-800 border border-blue-100/50 rounded-tl-sm shadow-blue-100/30'
+                            }
+                          `}>
+                            <div className="min-h-[20px] break-words leading-relaxed">
+                              {isUser ? (
+                                <div className="whitespace-pre-wrap">{sanitized}</div>
+                              ) : (
+                                <TableRenderer content={sanitized} />
+                              )}
+                            </div>
+
+                            {/* 图片显示 */}
+                            {message.image && (
+                              <div className="mt-3">
+                                <img
+                                  src={message.image}
+                                  alt="Uploaded"
+                                  className="max-w-md rounded-xl shadow-md border border-gray-100 cursor-zoom-in hover:shadow-lg transition-shadow"
+                                  onClick={() => window.open(message.image, '_blank')}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
 
-                {/* 加载中状态 - 改进的打字指示器 */}
+                {/* 加载中状态 */}
                 {isLoading && messages[messages.length - 1]?.role !== 'assistant' && (
-                   <div className="w-full bg-gray-50">
-                      <div className="max-w-3xl mx-auto flex gap-4 p-4 md:py-6 lg:px-0 m-auto">
-                        <div className="w-8 flex flex-col relative items-end">
-                          <div className="h-8 w-8 bg-green-500 rounded-sm flex items-center justify-center text-white">
+                   <div className="w-full px-4 mb-4">
+                      <div className="max-w-3xl mx-auto flex gap-4">
+                        <div className="shrink-0">
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-green-500 flex items-center justify-center text-white shadow-lg shadow-green-200">
                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                           </div>
                         </div>
                         <div className="flex-1">
-                           <div className="font-semibold text-sm mb-2 opacity-90">AI 助教</div>
-                           <div className="flex items-center gap-1.5 h-6">
-                              <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
-                              <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1s' }} />
-                              <span className="w-2 h-2 bg-green-400 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1s' }} />
-                              <span className="ml-2 text-sm text-gray-400">正在思考...</span>
+                           <div className="text-xs font-medium text-gray-500 mb-1.5 px-1">专属私教</div>
+                           <div className="inline-block bg-white/95 backdrop-blur border border-blue-100/50 px-5 py-4 rounded-2xl rounded-tl-sm shadow-lg shadow-blue-100/30">
+                             <div className="flex items-center gap-2">
+                                <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1s' }} />
+                                <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1s' }} />
+                                <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1s' }} />
+                                <span className="ml-2 text-sm text-gray-500">正在思考...</span>
+                             </div>
                            </div>
                         </div>
                       </div>
                    </div>
                 )}
-                
-                {/* 底部留白，防止输入框遮挡 */}
-                <div className="w-full h-32 shrink-0" />
+
+                {/* 底部留白 */}
+                <div className="w-full h-36 shrink-0" />
                 <div ref={messagesEndRef} />
               </div>
             </div>
 
-            {/* 滚动到底部按钮 (当用户向上滚动时显示) */}
+            {/* 滚动到底部按钮 */}
             {showScrollButton && (
               <button
                 onClick={() => scrollToBottom(true)}
-                className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-white border border-gray-200 shadow-md rounded-full p-2 text-gray-600 hover:text-gray-900 z-10 animate-bounce"
+                className="absolute bottom-28 left-1/2 -translate-x-1/2 bg-white border border-blue-200 shadow-lg shadow-blue-100/50 rounded-full p-2.5 text-blue-600 hover:text-blue-700 hover:shadow-xl z-10 transition-all"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                 </svg>
               </button>
             )}
 
             {/* 输入区域 */}
-            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-white via-white to-transparent pt-10 pb-6 px-4">
+            <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-sky-100 via-sky-50/90 to-transparent pt-8 pb-6 px-4">
               <div className="max-w-3xl mx-auto relative">
-                <div className="relative flex items-end w-full p-3 bg-white border border-gray-200 shadow-lg rounded-2xl overflow-hidden">
+                <div className="relative flex items-end w-full p-3 bg-white/95 backdrop-blur-xl border border-blue-200/50 shadow-2xl shadow-blue-100/40 rounded-2xl overflow-hidden">
                   <textarea
                     value={inputMessage}
                     onChange={(e) => {
                       setInputMessage(e.target.value);
-                      // 自动调整高度
                       e.target.style.height = 'auto';
                       e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
                     }}
@@ -814,49 +954,95 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
                         handleSendMessage();
                       }
                     }}
-                    placeholder="发送消息..."
+                    placeholder="输入你的问题..."
                     rows={1}
-                    className="w-full max-h-[200px] py-1 pl-1 pr-10 resize-none border-none focus:ring-0 focus:outline-none text-gray-800 placeholder-gray-400 bg-transparent"
-                    style={{ minHeight: '24px' }}
+                    className="w-full max-h-[200px] py-2 pl-2 pr-12 resize-none border-none focus:ring-0 focus:outline-none text-gray-800 placeholder-gray-400 bg-transparent"
+                    style={{ minHeight: '28px' }}
                     disabled={isLoading}
                   />
                   <button
                     onClick={handleSendMessage}
                     disabled={!inputMessage.trim() || isLoading}
-                    className={`absolute right-2 bottom-2 p-1.5 rounded-md transition-colors ${
-                      inputMessage.trim() && !isLoading 
-                        ? 'bg-green-500 text-white hover:bg-green-600' 
+                    className={`absolute right-3 bottom-3 p-2.5 rounded-xl transition-all ${
+                      inputMessage.trim() && !isLoading
+                        ? 'bg-gradient-to-r from-blue-500 to-sky-500 text-white hover:from-blue-600 hover:to-sky-600 shadow-lg shadow-blue-200 hover:shadow-xl hover:scale-105'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                     </svg>
                   </button>
                 </div>
-                <div className="text-center text-xs text-gray-400 mt-2">
-                   AI 可能会产生错误信息，请核对重要事实。
+                <div className="text-center text-xs text-gray-500 mt-3">
+                   内容仅供参考，请核对重要信息
                 </div>
               </div>
             </div>
           </>
         ) : (
-          /* 空状态 */
-          <div className="flex-1 flex flex-col items-center justify-center bg-white text-gray-800">
-             <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mb-6">
-                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+          /* 空状态 - 浅蓝色现代化风格 */
+          <div className="flex-1 flex flex-col items-center justify-center px-4">
+             <div className="text-center max-w-md">
+               {/* 图标 */}
+               <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-br from-blue-500 to-sky-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-blue-200 rotate-3 hover:rotate-0 transition-transform">
+                  <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+               </div>
+
+               {/* 标题 */}
+               <h2 className="text-3xl font-bold text-gray-800 mb-3">有什么可以帮你的吗？</h2>
+               <p className="text-gray-500 mb-8">选择一个对话开始，或创建新对话与专属私教交流</p>
+
+               {/* 快捷操作 */}
+               <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                 <button
+                    onClick={() => setShowNewChatForm(true)}
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-sky-500 text-white font-semibold rounded-xl hover:from-blue-600 hover:to-sky-600 transition-all shadow-lg shadow-blue-200 hover:shadow-xl hover:-translate-y-0.5"
+                 >
+                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                   </svg>
+                   开始新对话
+                 </button>
+                 {!isSidebarOpen && (
+                   <button
+                      onClick={() => setIsSidebarOpen(true)}
+                      className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-all border border-gray-200 shadow-md hover:shadow-lg lg:hidden"
+                   >
+                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                     </svg>
+                     查看历史
+                   </button>
+                 )}
+               </div>
+
+               {/* 提示卡片 */}
+               <div className="mt-10 grid gap-3 text-left">
+                 <div className="p-4 bg-white/80 backdrop-blur rounded-xl border border-blue-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setShowNewChatForm(true); setChatType('general'); }}>
+                   <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-100 to-sky-100 flex items-center justify-center">
+                       <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                     </div>
+                     <div>
+                       <div className="font-semibold text-gray-800">普通对话</div>
+                       <div className="text-sm text-gray-500">自由提问，获取 AI 解答</div>
+                     </div>
+                   </div>
+                 </div>
+                 <div className="p-4 bg-white/80 backdrop-blur rounded-xl border border-blue-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setShowNewChatForm(true); setChatType('learning'); }}>
+                   <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-100 to-green-100 flex items-center justify-center">
+                       <svg className="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                     </div>
+                     <div>
+                       <div className="font-semibold text-gray-800">系统化学习</div>
+                       <div className="text-sm text-gray-500">按学科主题进行结构化学习</div>
+                     </div>
+                   </div>
+                 </div>
+               </div>
              </div>
-             <h2 className="text-2xl font-semibold mb-2">有什么可以帮你的吗？</h2>
-             
-             {/* 侧边栏 Toggle (如果已关闭) */}
-             {!isSidebarOpen && (
-               <button 
-                  onClick={() => setIsSidebarOpen(true)}
-                  className="mt-8 px-4 py-2 bg-black text-white rounded-md text-sm hover:bg-gray-800 transition-colors lg:hidden"
-               >
-                 查看历史对话
-               </button>
-             )}
           </div>
         )}
       </div>

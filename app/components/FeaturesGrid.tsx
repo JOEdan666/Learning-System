@@ -31,8 +31,8 @@ const features = [
     iconColor: 'text-purple-600'
   },
   {
-    title: 'AI 对话',
-    desc: '与 AI 助教自由对话，答疑解惑',
+    title: '私教对话',
+    desc: '与专属私教自由对话，答疑解惑',
     href: '/unified-chat',
     icon: MessageSquare,
     color: 'from-green-500 to-emerald-500',

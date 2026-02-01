@@ -10,6 +10,11 @@ const isProtectedRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
+  // 开发环境且请求 API 时，跳过验证
+  if (process.env.NODE_ENV === 'development' && req.nextUrl.pathname.startsWith('/api/')) {
+    return;
+  }
+  
   if (isProtectedRoute(req)) {
     await auth.protect();
   }

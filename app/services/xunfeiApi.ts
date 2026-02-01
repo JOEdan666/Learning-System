@@ -1,4 +1,6 @@
 // 科大讯飞大模型API服务
+import { GLOBAL_SYSTEM_PROMPT } from '@/app/lib/aiPrompts'
+
 export interface XunfeiConfig {
   appId: string;
   apiKey: string;
@@ -267,19 +269,39 @@ export class XunfeiApiService {
   async sendMessage(query: string, history?: MessageItem[]) {
     try {
       this.debugLog('准备发送消息...', { query, historyLength: history?.length });
-      
+
       if (!this.isConnected || !this.ws) {
         this.debugLog('需要先建立连接');
         await this.connect();
       }
-      
+
       if (!this.ws || !this.isConnected) {
         const error = new Error('未成功建立WebSocket连接');
         this.debugLog(error.message);
         throw error;
       }
-      
-      const messages = history || [];
+
+      // 构建消息列表，注入全局系统提示词
+      const messages: MessageItem[] = [];
+
+      // 检查是否已有system消息
+      const hasSystemMessage = history?.some(m => m.role === 'system');
+      if (!hasSystemMessage) {
+        messages.push({ role: 'system', content: GLOBAL_SYSTEM_PROMPT });
+      }
+
+      // 添加历史消息（如果有system消息，合并全局提示）
+      if (history) {
+        for (const msg of history) {
+          if (msg.role === 'system' && !hasSystemMessage) {
+            messages.push({ ...msg, content: GLOBAL_SYSTEM_PROMPT + '\n\n' + msg.content });
+          } else {
+            messages.push(msg);
+          }
+        }
+      }
+
+      // 添加当前用户消息
       messages.push({ role: 'user', content: query });
 
       const data = {

@@ -48,7 +48,7 @@ export default function LearningSetupPage() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 max-w-2xl mx-auto">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-slate-900">开启新的学习旅程</h1>
-          <p className="text-slate-500 mt-2">选择你想要攻克的知识点，AI 助教将为你生成专属路径</p>
+          <p className="text-slate-500 mt-2">选择你想要攻克的知识点，专属私教将为你生成专属路径</p>
         </div>
 
         <div className="space-y-6">

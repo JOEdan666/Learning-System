@@ -25,7 +25,7 @@ export default function UnifiedChatPage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-sky-100/50 to-blue-100">
       <UnifiedChat savedItems={savedItems} />
     </div>
   )

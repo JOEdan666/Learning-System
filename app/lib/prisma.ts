@@ -20,6 +20,8 @@ export const prisma =
       : ['error'],
   });
 
+// 确保在开发环境下复用实例，避免连接数爆炸
+
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
 }

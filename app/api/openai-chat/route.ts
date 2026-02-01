@@ -1,15 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { GLOBAL_SYSTEM_PROMPT } from '@/app/lib/aiPrompts'
+
+// 限制消息长度与条数，防止一次请求传入过大的上下文导致上游超时
+const MAX_MESSAGES = 32
+const MAX_CONTENT_LENGTH = 4000
+
+const sanitizeMessages = (messages: any[] = []) => {
+  const trimmed = messages
+    .filter(m => m && typeof m.content === 'string' && m.content.trim().length > 0)
+    .slice(-MAX_MESSAGES)
+    .map(m => ({
+      role: m.role,
+      content: m.content.trim().slice(0, MAX_CONTENT_LENGTH),
+    }))
+  return trimmed
+}
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    
+
     // 支持两种数据格式：
     // 1. { query, history } - 旧格式
     // 2. { messages } - 新格式（从ExplainStep发送）
     let messages;
     let query = '';
-    
+
     if (body.messages) {
       // 新格式：直接使用messages
       messages = body.messages;
@@ -21,6 +37,23 @@ export async function POST(req: NextRequest) {
       const { query: q, history } = body;
       query = q || '';
       messages = (history || []).concat([{ role: 'user', content: query }]);
+    }
+
+    // 清洗消息，限制长度与数量，避免把无效/过长内容传上游
+    messages = sanitizeMessages(messages);
+
+    // 在消息开头注入全局系统提示词（如果没有system消息的话）
+    const hasSystemMessage = messages.some((m: any) => m.role === 'system');
+    if (!hasSystemMessage) {
+      messages = [{ role: 'system', content: GLOBAL_SYSTEM_PROMPT }, ...messages];
+    } else {
+      // 如果已有system消息，将全局提示合并到第一个system消息
+      messages = messages.map((m: any, index: number) => {
+        if (m.role === 'system' && index === messages.findIndex((msg: any) => msg.role === 'system')) {
+          return { ...m, content: GLOBAL_SYSTEM_PROMPT + '\n\n' + m.content };
+        }
+        return m;
+      });
     }
 
     const url = new URL(req.url)
@@ -54,21 +87,30 @@ export async function POST(req: NextRequest) {
     // 流式：将上游 SSE 转换为纯文本增量输出
     if (isStream) {
       console.log('[API] 处理流式请求');
-      const upstream = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature: 0.7,
-          stream: true,
-          ...(max_tokens ? { max_tokens } : {}),
-        }),
-        cache: 'no-store',
-      })
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45_000);
+
+      let upstream: Response;
+      try {
+        upstream = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.7,
+            stream: true,
+            ...(max_tokens ? { max_tokens } : {}),
+          }),
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(timeout);
+      }
 
       console.log('[API] 上游响应状态:', upstream.status);
       
@@ -160,26 +202,36 @@ export async function POST(req: NextRequest) {
         headers: {
           'Content-Type': 'text/plain; charset=utf-8',
           'Cache-Control': 'no-store',
+          'X-Accel-Buffering': 'no',
         },
       })
     }
 
     // 非流式：保留原有一次性返回
     console.log('[API] 处理非流式请求');
-    const resp = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: 0.7,
-        ...(max_tokens ? { max_tokens } : {}),
-      }),
-      cache: 'no-store',
-    })
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+
+    let resp: Response;
+    try {
+      resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.7,
+          ...(max_tokens ? { max_tokens } : {}),
+        }),
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!resp.ok) {
       let errText = ''
@@ -202,6 +254,10 @@ export async function POST(req: NextRequest) {
     console.log('[API] 非流式响应内容长度:', content.length);
     return NextResponse.json({ content })
   } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      console.error('[API] 请求超时，已中断上游连接');
+      return NextResponse.json({ error: 'Upstream request timed out' }, { status: 504 })
+    }
     console.error('[API] 发生未捕获错误:', e);
     return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 })
   }

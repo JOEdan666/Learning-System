@@ -10,15 +10,12 @@ import {
   GenerateTitleResponse
 } from '../types/conversation';
 import { ChatMessage } from '../utils/chatTypes';
-import { createProviderFromEnv } from './ai';
-import type { AIProvider } from './ai';
 
 export class ConversationService {
   private static instance: ConversationService;
-  private aiProvider: AIProvider | null = null;
-  
+
   private constructor() {
-    this.aiProvider = createProviderFromEnv();
+    // 无需初始化AI Provider，标题生成通过API完成
   }
   
   static getInstance(): ConversationService {
@@ -120,6 +117,11 @@ export class ConversationService {
     }
   }
 
+  // 查找或创建学习对话 (复用 createConversation，后端已处理幂等性)
+  async findOrCreateLearningConversation(request: CreateConversationRequest): Promise<ConversationHistory> {
+    return this.createConversation(request);
+  }
+
   // 更新对话
   async updateConversation(id: string, request: UpdateConversationRequest): Promise<ConversationHistory | null> {
     try {
@@ -192,81 +194,37 @@ export class ConversationService {
     }
   }
 
-  // 生成对话标题 (保持原逻辑，因为这是调用 AI 服务，不涉及数据库)
+  // 生成对话标题 (通过API调用，服务端有API Key)
   async generateTitle(request: GenerateTitleRequest): Promise<GenerateTitleResponse> {
     try {
-      if (request.type === 'learning' && request.subject && request.topic) {
-        return {
-          title: `${request.subject} - ${request.topic}`,
-          confidence: 1.0
-        };
-      }
-
-      const tempProvider = createProviderFromEnv();
-      if (!tempProvider) {
-        throw new Error('AI Provider 未初始化');
-      }
-
-      const recentMessages = request.messages.slice(-6);
-      const conversationContent = recentMessages
-        .map(msg => `${msg.role}: ${msg.content}`)
-        .join('\n');
-
-      const prompt = `请基于以下对话内容，生成一个简洁精炼的对话标题（不超过10个字）：
-
-${conversationContent}
-
-要求：
-1. 标题要能概括对话的主要内容
-2. 简洁明了，尽量不超过10个字
-3. 避免使用"关于"、"讨论"等冗余词汇
-4. 直接返回标题文本，不要包含任何标点符号或重复内容
-5. 不要重复输出标题
-
-标题：`;
-
-      return new Promise((resolve) => {
-        let fullResponse = '';
-        
-        tempProvider.onMessage((message: string, isFinal: boolean) => {
-          fullResponse += message;
-          if (isFinal) {
-            let title = fullResponse.trim().replace(/^标题[：:]\s*/, '').trim();
-            if (title.length > 4) {
-              if (title.length % 2 === 0) {
-                const halfLen = title.length / 2;
-                const firstHalf = title.substring(0, halfLen);
-                const secondHalf = title.substring(halfLen);
-                if (firstHalf === secondHalf) {
-                  title = firstHalf;
-                }
-              }
-              title = title.replace(/(.{2,})\1+/g, '$1');
-            }
-            tempProvider.close();
-            resolve({
-              title: title || '新对话',
-              confidence: 0.8
-            });
-          }
-        });
-        
-        tempProvider.onError((error: string) => {
-          console.error('生成标题失败:', error);
-          tempProvider.close();
-          resolve({
-            title: request.type === 'learning' ? '系统化学习' : '新对话',
-            confidence: 0.5
-          });
-        });
-        
-        tempProvider.sendMessage(prompt);
+      const response = await fetch('/api/generate-title', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: request.messages,
+          type: request.type,
+          subject: request.subject,
+          topic: request.topic
+        }),
       });
+
+      if (!response.ok) {
+        throw new Error('生成标题API请求失败');
+      }
+
+      return await response.json();
     } catch (error) {
       console.error('生成标题失败:', error);
+      // 本地备用方案
+      const firstUser = request.messages.find(m => m.role === 'user');
+      const fallback = firstUser?.content || request.messages[0]?.content || '';
+      const plain = (fallback || '').replace(/\s+/g, ' ').trim();
+      const title = plain.length > 12 ? plain.slice(0, 12) + '…' : (plain || '新对话');
       return {
-        title: request.type === 'learning' ? '系统化学习' : '新对话',
-        confidence: 0.5
+        title,
+        confidence: 0.3
       };
     }
   }

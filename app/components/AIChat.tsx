@@ -46,6 +46,23 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   };
+  // 更强大的前缀过滤，覆盖AI可能使用的各种变体
+  const stripKnowledgePrefix = (content: string) => {
+    if (!content) return '';
+    // 多种前缀模式依次过滤
+    const patterns = [
+      /^(根据|基于|依据|参考|结合|综合)?(你的|本|提供的|上述|以上|给定的|所给的|已有的|现有的)?(知识库|资料|内容|信息|材料|文档|参考资料)[，,、:：]?\s*/gi,
+      /^(从|按照|通过)?(你的|本|提供的)?(知识库|资料)[来]?(来看|分析|了解|可知)[，,、:：]?\s*/gi,
+      /^好的[，,]?\s*/gi,
+      /^(让我|我来|我将|我会)(为你|帮你|给你)?[，,]?\s*/gi,
+      /^(首先|接下来)[，,]?\s*/gi,
+    ];
+    let result = content;
+    for (const pattern of patterns) {
+      result = result.replace(pattern, '');
+    }
+    return result.trim();
+  };
 
   // 从环境变量创建 Provider；保持与原有环境变量兼容
   const DEBUG_MODE = (process.env.NEXT_PUBLIC_XUNFEI_DEBUG === 'true') || (process.env.NEXT_PUBLIC_AI_DEBUG === 'true');
@@ -80,7 +97,7 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
           const lastMessage = prev[prev.length - 1];
           
           // 确保内容不为undefined或null
-          const validContent = content || '';
+          const validContent = stripKnowledgePrefix(content || '');
           
           if (lastMessage && lastMessage.role === 'assistant') {
             // 更新最后一条助手消息
@@ -338,7 +355,12 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     const formatted = chunks
       .map((c, idx) => `${idx + 1}. [${c.file} #${c.position}] ${c.content}`)
       .join('\n');
-    return `以下是内置学习资料片段，请严格基于这些内容回答，并标注对应的文件与片段编号。若资料不足请说明：\n${formatted}\n\n用户问题：`;
+    return `【重要指令】你是专属私教，请直接回答问题。严禁使用任何开场白，包括但不限于："根据知识库"、"根据资料"、"基于提供的内容"、"好的"、"让我"、"首先"等。直接进入正题作答。
+
+参考资料：
+${formatted}
+
+用户问题：`;
   };
 
   const handleSendMessage = async () => {
@@ -450,47 +472,64 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
     const answer = match ? contentStr.replace(match[0], '').trim() : contentStr
     const isExpanded = !!expandedReasoning[index]
     const toggle = () => setExpandedReasoning(prev => ({ ...prev, [index]: !prev[index] }))
+    
+    const isUser = message.role === 'user';
+
     return (
-      <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
-        <div className={`relative max-w-[80%] p-3 rounded-lg ${
-          message.role === 'user' 
-            ? 'bg-primary text-white' 
-            : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 shadow-sm'
+      <div key={index} className={`flex gap-3 mb-6 group ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+        {/* 头像 */}
+        <div className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center shadow-sm ${
+          isUser ? 'bg-primary text-white' : 'bg-gradient-to-br from-green-400 to-green-600 text-white'
         }`}>
-          {message.role === 'assistant' && (
+          {isUser ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          )}
+        </div>
+
+        {/* 气泡 */}
+        <div className={`relative max-w-[85%] sm:max-w-[75%] px-5 py-3.5 shadow-sm transition-all ${
+          isUser 
+            ? 'bg-primary text-white rounded-2xl rounded-tr-sm' 
+            : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border border-gray-100 dark:border-gray-700 rounded-2xl rounded-tl-sm'
+        }`}>
+          {/* 复制按钮 (仅AI) */}
+          {!isUser && (
             <button
               type="button"
-              className="absolute top-2 right-2 text-xs text-primary dark:text-primary hover:underline"
+              className="absolute top-2 right-2 p-1 text-gray-400 hover:text-primary dark:text-gray-500 dark:hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
               onClick={() => copyMessage(answer)}
+              title="复制内容"
             >
-              复制
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
             </button>
           )}
-          <div className="max-w-none">
-            {message.role === 'assistant' ? (
-              (() => {
-                return (
-                  <>
-                    <TableRenderer content={answer} />
-                    {reasoning && (
-                      <div className="mt-2 border-t dark:border-gray-700 pt-2">
-                        <button
-                          type="button"
-                          onClick={toggle}
-                          className="text-xs text-primary dark:text-primary hover:underline"
-                        >{isExpanded ? '隐藏思考过程' : '显示思考过程'}</button>
-                        {isExpanded && (
-                          <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-900 rounded text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                            {reasoning}
-                          </div>
-                        )}
+
+          <div className={`text-sm leading-relaxed ${isUser ? 'text-white' : ''}`}>
+            {isUser ? (
+              <div className="whitespace-pre-wrap">{message.content}</div>
+            ) : (
+              <>
+                <TableRenderer content={answer} />
+                {reasoning && (
+                  <div className="mt-3 border-t border-dashed border-gray-200 dark:border-gray-700 pt-2">
+                    <button
+                      type="button"
+                      onClick={toggle}
+                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-primary transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 3v4"/><path d="M3 5h4"/><path d="M3 9h4"/></svg>
+                      {isExpanded ? '收起思考过程' : '查看思考过程'}
+                    </button>
+                    {isExpanded && (
+                      <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg text-xs text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap border border-gray-100 dark:border-gray-800">
+                        {reasoning}
                       </div>
                     )}
-                  </>
-                )
-              })()
-            ) : (
-              <TableRenderer content={message.content || ''} />
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -564,7 +603,7 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
       {/* 左侧：会话列表 - 可以隐藏/显示 */}
       <aside className={`${showSidebar ? 'w-64 md:w-72' : 'w-0'} border-r border-gray-200 dark:border-gray-700 flex flex-col bg-white dark:bg-gray-800 transition-all duration-300 ease-in-out overflow-hidden`}>
         <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900">
-          <h2 className="text-lg font-semibold text-gray-800 dark:text-white">AI对话</h2>
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-white">私教对话</h2>
           <div className="flex items-center gap-2">
             <button onClick={handleNewConversation} className="text-primary dark:text-primary text-sm hover:underline">新建</button>
             <button 
@@ -779,9 +818,14 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
             <div className="max-w-3xl mx-auto space-y-2">
               {messages.map(renderMessage)}
               {isLoading && (
-                <div className="flex justify-start mb-4">
-                  <div className="max-w-[80%] p-3 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border dark:border-gray-700 shadow-sm">
-                    <p className="animate-pulse">AI正在思考...</p>
+                <div className="flex gap-3 mb-6">
+                  <div className="flex-shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center shadow-sm text-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+                  </div>
+                  <div className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 px-5 py-4 rounded-2xl rounded-tl-sm shadow-sm flex items-center gap-1.5">
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
                 </div>
               )}
@@ -875,45 +919,58 @@ const AIChat: React.FC<AIChatProps> = ({ savedItems, onClose }) => {
         </div>
 
         {/* 输入区域 */}
-        <div className="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-800">
-          <div className="max-w-2xl mx-auto space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {quickTemplates.map((tpl, idx) => (
+        <div className="p-4 border-t border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800">
+          <div className="max-w-3xl mx-auto space-y-3">
+            {/* 快捷模板 */}
+            {quickTemplates.length > 0 && (
+              <div className="flex flex-wrap gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                {quickTemplates.map((tpl, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="flex-shrink-0 text-xs px-3 py-1.5 rounded-full border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
+                    onClick={() => {
+                      setInputMessage(tpl);
+                      setTimeout(resizeTextarea, 0);
+                    }}
+                  >
+                    {tpl}
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {/* 输入框容器 */}
+            <div className="relative flex items-end gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-3xl px-4 py-2 focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all shadow-sm hover:shadow-md">
+              <textarea
+                ref={textareaRef}
+                value={inputMessage}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder="输入您的问题，按Enter发送..."
+                className="w-full max-h-[150px] py-2 bg-transparent border-none focus:ring-0 resize-none text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 leading-relaxed"
+                style={{ minHeight: '24px', overflow: 'auto' }}
+                disabled={isLoading || !!error || !apiServiceRef.current}
+              />
+              
+              <div className="flex-shrink-0 pb-1">
                 <button
-                  key={idx}
-                  type="button"
-                  className="text-xs px-3 py-1 rounded-full border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-                  onClick={() => {
-                    setInputMessage(tpl);
-                    resizeTextarea();
-                  }}
+                  onClick={handleSendMessage}
+                  disabled={!inputMessage.trim() || isLoading || !!error || !apiServiceRef.current}
+                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-all duration-200 ${
+                    inputMessage.trim() && !isLoading && !error && apiServiceRef.current
+                      ? 'bg-primary text-white hover:bg-primary/90 shadow-md transform hover:scale-105'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                  }`}
+                  aria-label="发送"
                 >
-                  {tpl}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={inputMessage.trim() ? 'ml-0.5' : ''}><line x1="22" x2="11" y1="2" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 </button>
-              ))}
+              </div>
             </div>
-            <textarea
-              ref={textareaRef}
-              value={inputMessage}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              placeholder="输入您的问题，按Enter发送，Shift+Enter换行..."
-              className="w-full pl-4 pr-12 py-2 border dark:border-gray-600 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary resize-none text-sm bg-white dark:bg-gray-800 dark:text-white mx-auto shadow-sm hover:shadow-md transition-all duration-300"
-              disabled={isLoading || !!error || !apiServiceRef.current}
-              style={{ minHeight: '48px', overflow: 'auto' }}
-            />
-            <div className="flex justify-end mt-2">
-              <button
-                onClick={handleSendMessage}
-                disabled={!inputMessage.trim() || isLoading || !!error || !apiServiceRef.current}
-                className={`px-4 py-2 rounded-md text-white transition-colors ${
-                  inputMessage.trim() && !isLoading && !error && apiServiceRef.current
-                    ? 'bg-primary hover:bg-primary/90'
-                    : 'bg-slate-300 dark:bg-slate-600 cursor-not-allowed'
-                }`}
-              >
-                {isLoading ? '发送中...' : '发送'}
-              </button>
+            
+            <div className="text-center">
+               <p className="text-[10px] text-gray-400">内容仅供参考，请核对重要信息</p>
             </div>
           </div>
         </div>
