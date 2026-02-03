@@ -6,28 +6,7 @@ import Link from 'next/link';
 import { ConversationService } from '../../services/conversationService';
 import { ConversationHistory } from '../../types/conversation';
 import { ChatMessage } from '../../utils/chatTypes';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
-
-// 自定义Markdown组件样式
-const customComponents = {
-  h1: ({node, ...props}: any) => <h1 className="text-2xl font-bold mt-6 mb-4 text-gray-900" {...props} />,
-  h2: ({node, ...props}: any) => <h2 className="text-xl font-bold mt-5 mb-3 text-gray-800" {...props} />,
-  h3: ({node, ...props}: any) => <h3 className="text-lg font-bold mt-4 mb-2 text-blue-600" {...props} />,
-  p: ({node, ...props}: any) => <p className="mb-3 text-gray-700 leading-relaxed" {...props} />,
-  strong: ({node, ...props}: any) => <strong className="font-bold text-blue-600" {...props} />,
-  ul: ({node, ...props}: any) => <ul className="list-disc pl-6 mb-4 space-y-2" {...props} />,
-  ol: ({node, ...props}: any) => <ol className="list-decimal pl-6 mb-4 space-y-2" {...props} />,
-  li: ({node, ...props}: any) => <li className="text-gray-700 leading-relaxed" {...props} />,
-  blockquote: ({node, ...props}: any) => <blockquote className="border-l-4 border-blue-300 pl-4 italic text-gray-600 bg-blue-50 py-2 rounded-r" {...props} />,
-  code: ({node, inline, ...props}: any) => 
-    inline 
-      ? <code className="bg-gray-100 rounded px-1 py-0.5 font-mono text-sm text-red-600" {...props} />
-      : <code className="block bg-gray-100 rounded p-3 font-mono text-sm overflow-x-auto" {...props} />,
-  pre: ({node, ...props}: any) => <pre className="bg-gray-100 rounded p-3 overflow-x-auto mb-4" {...props} />,
-};
+import MarkdownRenderer from '../../components/MarkdownRenderer';
 
 export default function LearningBrowsePage() {
   const params = useParams();
@@ -171,14 +150,11 @@ export default function LearningBrowsePage() {
                             {new Date(conversation.updatedAt).toLocaleString('zh-CN')}
                           </span>
                         </div>
-                        <div className="prose prose-sm max-w-none">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkMath]}
-                            rehypePlugins={[rehypeKatex]}
-                            components={customComponents}
-                          >
-                            {message.content}
-                          </ReactMarkdown>
+                        <div className="max-w-none">
+                          <MarkdownRenderer
+                            content={message.content}
+                            fontSize="sm"
+                          />
                         </div>
                       </div>
                     </div>

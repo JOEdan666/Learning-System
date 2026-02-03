@@ -1,12 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LearningState } from '../../types/learning';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
 import { CheckCircle, HelpCircle, ArrowRight, BookOpen } from 'lucide-react';
 import ReAskModal from './ReAskModal';
+import MarkdownRenderer from '../MarkdownRenderer';
 
 interface ExplainStepProps {
   content: string;
@@ -26,92 +22,6 @@ interface ExplainStepProps {
   grade?: string;
   semester?: string;
 }
-
-// 检测是否为ASCII艺术/树状图（包含特殊符号如╱╲├│└─等）
-const isAsciiArt = (text: string): boolean => {
-  const asciiArtChars = /[╱╲├│└─┌┐┘┬┴┼═║╔╗╚╝╠╣╦╩╬▲▼◆●○■□★☆→←↑↓↔⇒⇐⇑⇓]/;
-  const hasMultipleSpaces = /\s{2,}/.test(text);
-  const hasBoxDrawing = /[┌┐└┘├┤┬┴┼│─]/.test(text);
-  return asciiArtChars.test(text) || (hasMultipleSpaces && hasBoxDrawing);
-};
-
-// 优化的Markdown组件 - 针对知识点讲解
-const customComponents = {
-  h1: ({node, ...props}: any) => <h1 className="text-2xl font-bold mt-6 mb-4 text-slate-900 border-l-4 border-blue-500 pl-3" {...props} />,
-  h2: ({node, ...props}: any) => <h2 className="text-xl font-bold mt-5 mb-3 text-slate-800 flex items-center gap-2" {...props} />,
-  h3: ({node, ...props}: any) => <h3 className="text-lg font-semibold mt-4 mb-2 text-slate-700" {...props} />,
-  p: ({node, children, ...props}: any) => {
-    // 检测段落内容是否为ASCII艺术
-    const textContent = typeof children === 'string' ? children :
-      (Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : '');
-
-    if (isAsciiArt(textContent)) {
-      return (
-        <pre className="font-mono text-sm bg-slate-50 p-4 rounded-lg overflow-x-auto my-4 text-slate-700 leading-relaxed whitespace-pre" {...props}>
-          {children}
-        </pre>
-      );
-    }
-    return <p className="mb-3 text-slate-600 leading-relaxed" {...props}>{children}</p>;
-  },
-  strong: ({node, ...props}: any) => <strong className="font-bold text-blue-700 bg-blue-50 px-1 rounded" {...props} />,
-  ul: ({node, ...props}: any) => <ul className="list-disc pl-5 mb-4 space-y-1 text-slate-600" {...props} />,
-  ol: ({node, ...props}: any) => <ol className="list-decimal pl-5 mb-4 space-y-1 text-slate-600" {...props} />,
-  li: ({node, ...props}: any) => <li className="pl-1" {...props} />,
-  blockquote: ({node, ...props}: any) => <blockquote className="border-l-4 border-yellow-400 pl-4 py-2 my-4 bg-yellow-50 text-slate-700 rounded-r" {...props} />,
-  // 代码块处理 - 支持ASCII艺术和普通代码
-  pre: ({node, children, ...props}: any) => {
-    return (
-      <pre className="font-mono text-sm bg-slate-900 text-slate-100 p-4 rounded-lg overflow-x-auto my-4 whitespace-pre" {...props}>
-        {children}
-      </pre>
-    );
-  },
-  code: ({node, inline, className, children, ...props}: any) => {
-    const match = /language-(\w+)/.exec(className || '')
-    const lang = match?.[1] || ''
-    const codeContent = String(children).replace(/\n$/, '');
-
-    // 行内代码
-    if (inline) {
-      return <code className="bg-slate-100 rounded px-1.5 py-0.5 font-mono text-sm text-pink-600" {...props}>{children}</code>
-    }
-
-    // 检测是否为ASCII艺术/知识结构图
-    if (isAsciiArt(codeContent) || lang === 'diagram' || lang === 'ascii' || lang === 'tree') {
-      return (
-        <div className="my-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
-          <div className="text-xs text-blue-600 font-medium mb-3 flex items-center gap-1">
-            <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-            知识结构图
-          </div>
-          <pre className="font-mono text-sm text-slate-800 whitespace-pre overflow-x-auto leading-relaxed">
-            {children}
-          </pre>
-        </div>
-      )
-    }
-
-    // 普通代码块
-    return (
-      <div className="relative group my-3">
-        {lang && <div className="absolute top-2 left-3 text-[10px] uppercase tracking-wider text-slate-400 bg-slate-800 px-2 py-0.5 rounded">{lang}</div>}
-        <pre className="bg-slate-900 rounded-lg p-4 pt-8 overflow-x-auto text-slate-100 text-sm">
-          <code className="font-mono whitespace-pre" {...props}>{children}</code>
-        </pre>
-      </div>
-    )
-  },
-  table: ({node, ...props}: any) => (
-    <div className="overflow-x-auto my-4 rounded-lg border border-slate-200 shadow-sm">
-      <table className="w-full border-collapse" {...props} />
-    </div>
-  ),
-  thead: ({node, ...props}: any) => <thead className="bg-slate-100" {...props} />,
-  tbody: ({node, ...props}: any) => <tbody className="bg-white" {...props} />,
-  th: ({node, ...props}: any) => <th className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border-b border-slate-200" {...props} />,
-  td: ({node, ...props}: any) => <td className="px-4 py-3 text-sm text-slate-600 border-b border-slate-100" {...props} />,
-};
 
 export default function ExplainStep({ 
   content, 
@@ -168,13 +78,7 @@ export default function ExplainStep({
           </div>
         ) : (
           <div className="prose prose-slate max-w-none">
-            <ReactMarkdown 
-              remarkPlugins={[remarkGfm, remarkMath]} 
-              rehypePlugins={[rehypeKatex]}
-              components={customComponents}
-            >
-              {content}
-            </ReactMarkdown>
+            <MarkdownRenderer content={content} fontSize="lg" />
           </div>
         )}
       </div>

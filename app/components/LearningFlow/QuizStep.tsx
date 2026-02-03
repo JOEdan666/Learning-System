@@ -3,12 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { BookOpen, Clock, CheckCircle, XCircle, ArrowRight, RotateCcw, Trophy, Terminal, RefreshCw } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import remarkBreaks from 'remark-breaks'
-import rehypeKatex from 'rehype-katex'
-import 'katex/dist/katex.min.css'
+import MarkdownRenderer from '../MarkdownRenderer'
 
 interface Question {
   id: number
@@ -543,16 +538,11 @@ export default function QuizStep({ knowledgeContent, region, grade, semester, su
           <div className="text-xl md:text-2xl font-medium text-slate-900 leading-relaxed mb-8 flex items-start gap-2">
             <span className="flex-shrink-0">{currentQuestionIndex + 1}.</span>
             <div className="flex-1 overflow-x-auto">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-                rehypePlugins={[rehypeKatex]}
-                components={{
-                  // 保持段落间距，同时避免h3嵌套p导致的HTML错误
-                  p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>
-                }}
-              >
-                {currentQuestion.question}
-              </ReactMarkdown>
+              <MarkdownRenderer
+                content={currentQuestion.question}
+                fontSize="lg"
+                className="!text-xl md:!text-2xl !prose-p:my-2 !prose-h1:mt-4 !prose-h2:mt-4 !prose-h3:mt-3"
+              />
             </div>
           </div>
 
@@ -577,16 +567,11 @@ export default function QuizStep({ knowledgeContent, region, grade, semester, su
                         {String.fromCharCode(65 + idx)}
                       </span>
                       <div className="text-lg flex-1">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-                          rehypePlugins={[rehypeKatex]}
-                          components={{
-                            // 移除 p 标签默认的外边距以保持选项布局整洁
-                            p: ({children}) => <span className="block">{children}</span>
-                          }}
-                        >
-                          {option.replace(/^[A-D][\.\、\s]*/, '')}
-                        </ReactMarkdown>
+                        <MarkdownRenderer
+                          content={option.replace(/^[A-D][\.\、\s]*/, '')}
+                          fontSize="sm"
+                          className="!text-lg !prose-p:my-0 !prose-p:leading-snug"
+                        />
                       </div>
                     </button>
                   );

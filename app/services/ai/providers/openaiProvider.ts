@@ -115,7 +115,7 @@ export class OpenAIProvider implements AIProvider {
             totalContent += chunk
             
             // 确保messageHandler存在且不为空字符串
-            if (this.messageHandler && chunk.trim() !== '') {
+            if (this.messageHandler && chunk.length > 0) {
               console.log(`[OpenAIProvider] 调用messageHandler，内容长度: ${chunk.length}`);
               this.messageHandler(chunk, false)
             }

@@ -1,29 +1,15 @@
+
 // 简单的内存数据库，用于开发环境数据库不可用时的兜底
-// 使用全局变量在所有路由间共享数据
+// 挂载在 global 对象上以在热重载中保持数据
 
-declare global {
-  var __memoryDBData: { conversations: any[]; learningSessions: any[] } | undefined;
-}
-
-// 确保数据持久化在全局变量中
-if (!global.__memoryDBData) {
-  global.__memoryDBData = { conversations: [], learningSessions: [] };
-  console.log('🌟 [MemoryDB] 初始化全局内存存储');
-}
+const globalForMemoryDB = global as unknown as { memoryDB: MemoryDB };
 
 class MemoryDB {
-  get conversations() {
-    return global.__memoryDBData!.conversations;
-  }
-  set conversations(val: any[]) {
-    global.__memoryDBData!.conversations = val;
-  }
-
-  get learningSessions() {
-    return global.__memoryDBData!.learningSessions;
-  }
-  set learningSessions(val: any[]) {
-    global.__memoryDBData!.learningSessions = val;
+  conversations: any[] = [];
+  learningSessions: any[] = [];
+  
+  constructor() {
+    console.log('🌟 [MemoryDB] 初始化内存数据库');
   }
 
   // Conversation Methods
@@ -70,52 +56,72 @@ class MemoryDB {
     let results = this.conversations.filter(c => !c.isArchived);
     if (where.userId) results = results.filter(c => c.userId === where.userId);
     if (where.type) results = results.filter(c => c.type === where.type);
-
+    
     // 关联 learningSession
     return results.map(c => ({
       ...c,
       learningSession: this.learningSessions.find(ls => ls.conversationId === c.id)
-    })).sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
+    })).sort((a, b) => b.lastActivity - a.lastActivity);
   }
 
   async getConversation(id: string, userId?: string) {
-    const conv = this.conversations.find(c => c.id === id && (!userId || c.userId === userId));
-    if (!conv) return null;
+    const conversation = this.conversations.find(c => c.id === id);
+    if (!conversation) return null;
+    if (userId && conversation.userId !== userId) return null;
+    
     return {
-      ...conv,
-      learningSession: this.learningSessions.find(ls => ls.conversationId === id)
-    };
-  }
-
-  async updateConversation(id: string, data: any, userId?: string) {
-    const index = this.conversations.findIndex(c => c.id === id && (!userId || c.userId === userId));
-    if (index === -1) return null;
-
-    const now = new Date();
-    const existing = this.conversations[index];
-    const updated = {
-      ...existing,
-      ...data,
-      updatedAt: now,
-      lastActivity: now,
-      messageCount: data.messages ? data.messages.length : existing.messageCount
-    };
-    this.conversations[index] = updated;
-
-    return {
-      ...updated,
+      ...conversation,
       learningSession: this.learningSessions.find(ls => ls.conversationId === id)
     };
   }
 
   async deleteConversation(id: string, userId?: string) {
-    const index = this.conversations.findIndex(c => c.id === id && (!userId || c.userId === userId));
+    const index = this.conversations.findIndex(c => c.id === id);
     if (index === -1) return false;
+    
+    const conversation = this.conversations[index];
+    if (userId && conversation.userId !== userId) return false;
+    
+    // 删除对话
     this.conversations.splice(index, 1);
-    // 也删除关联的learningSession
+    
+    // 级联删除 LearningSession
     const lsIndex = this.learningSessions.findIndex(ls => ls.conversationId === id);
-    if (lsIndex !== -1) this.learningSessions.splice(lsIndex, 1);
+    if (lsIndex !== -1) {
+      this.learningSessions.splice(lsIndex, 1);
+    }
+    
     return true;
+  }
+
+  async updateConversation(id: string, data: any, userId?: string) {
+    const index = this.conversations.findIndex(c => c.id === id);
+    if (index === -1) {
+      throw new Error(`Conversation ${id} not found`);
+    }
+    
+    const existing = this.conversations[index];
+    if (userId && existing.userId !== userId) {
+      throw new Error('Unauthorized');
+    }
+
+    const updated = {
+      ...existing,
+      ...data,
+      updatedAt: new Date(),
+      lastActivity: new Date()
+    };
+    
+    if (data.messages) {
+      updated.messageCount = data.messages.length;
+    }
+
+    this.conversations[index] = updated;
+    
+    return {
+      ...updated,
+      learningSession: this.learningSessions.find(ls => ls.conversationId === id)
+    };
   }
 
   // LearningSession Methods
@@ -147,14 +153,8 @@ class MemoryDB {
   }
 }
 
-// 使用全局变量缓存 MemoryDB 实例
-declare global {
-  var __memoryDBInstance: MemoryDB | undefined;
-}
+export const memoryDB = globalForMemoryDB.memoryDB || new MemoryDB();
 
-if (!global.__memoryDBInstance) {
-  global.__memoryDBInstance = new MemoryDB();
-  console.log('🌟 [MemoryDB] 创建全局 MemoryDB 实例');
+if (process.env.NODE_ENV !== 'production') {
+  globalForMemoryDB.memoryDB = memoryDB;
 }
-
-export const memoryDB = global.__memoryDBInstance;

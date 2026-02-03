@@ -14,10 +14,10 @@ export default function CurrentLearningCard() {
 
   useEffect(() => {
     // 获取最近的学习会话
-    const fetchLatestSession = () => {
+    const fetchLatestSession = async () => {
       try {
-        const cs = ConversationService.getInstance()
-        const conversations = cs.getAllConversations()
+        // 使用静态方法获取对话列表
+        const conversations = await ConversationService.getAllConversations()
         
         // 筛选出学习类型的会话，并按最后活动时间排序
         const learningSessions = conversations

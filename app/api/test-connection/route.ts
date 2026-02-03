@@ -4,7 +4,7 @@ export async function GET() {
   try {
     const apiKey = process.env.OPENAI_API_KEY
     const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+    const model = process.env.OPENAI_MODEL || 'deepseek-chat'
 
     console.log('[API测试] 开始连接测试');
     console.log('[API测试] 配置:', { 
@@ -46,11 +46,12 @@ export async function GET() {
 
     if (!testResponse.ok) {
       let errorText = ''
+      const raw = await testResponse.text()
       try {
-        const errorData = await testResponse.json()
-        errorText = errorData?.error?.message || errorData?.error || JSON.stringify(errorData)
+        const errorData = JSON.parse(raw)
+        errorText = errorData?.error?.message || errorData?.error || raw
       } catch {
-        errorText = await testResponse.text()
+        errorText = raw
       }
       
       console.error('[API测试] 连接失败:', errorText);

@@ -102,6 +102,7 @@ DATABASE_URL="postgresql://JOEdan:962222mini%23@pgm-wz9e83um4mxsop2yvo.pg.rds.al
 OPENAI_API_KEY="your-deepseek-api-key"
 OPENAI_BASE_URL="https://api.deepseek.com"
 OPENAI_MODEL="deepseek-chat"
+# 可选：deepseek-reasoner
 
 # NextAuth
 NEXTAUTH_URL="https://learning-system.top"

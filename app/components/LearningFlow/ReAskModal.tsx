@@ -2,20 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { createProviderFromEnv } from '../../services/ai';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
-import TableRenderer, { parseMarkdownTable } from '../TableRenderer';
-
-// 检测是否为ASCII艺术/树状图
-const isAsciiArt = (text: string): boolean => {
-  const asciiArtChars = /[╱╲├│└─┌┐┘┬┴┼═║╔╗╚╝╠╣╦╩╬▲▼◆●○■□★☆→←↑↓↔⇒⇐⇑⇓]/;
-  const hasMultipleSpaces = /\s{2,}/.test(text);
-  const hasBoxDrawing = /[┌┐└┘├┤┬┴┼│─]/.test(text);
-  return asciiArtChars.test(text) || (hasMultipleSpaces && hasBoxDrawing);
-};
+import MarkdownRenderer from '../MarkdownRenderer';
 
 interface ReAskModalProps {
   isOpen: boolean;
@@ -37,150 +24,6 @@ export default function ReAskModal({ isOpen, onClose, onComplete, subject, topic
   const [question, setQuestion] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Markdown渲染的自定义组件（支持ASCII艺术和公式渲染）
-  const customComponents = {
-    h1: ({ children }: any) => <h1 className="text-xl font-bold mb-3 text-gray-800">{children}</h1>,
-    h2: ({ children }: any) => <h2 className="text-lg font-bold mb-2 text-gray-800">{children}</h2>,
-    h3: ({ children }: any) => <h3 className="text-base font-bold mb-2 text-gray-700">{children}</h3>,
-    p: ({ children }: any) => {
-      // 检测段落内容是否为ASCII艺术
-      const textContent = typeof children === 'string' ? children :
-        (Array.isArray(children) ? children.map((c: any) => typeof c === 'string' ? c : '').join('') : '');
-
-      if (isAsciiArt(textContent)) {
-        return (
-          <pre className="font-mono text-sm bg-blue-50 p-3 rounded-lg overflow-x-auto my-2 text-gray-700 leading-relaxed whitespace-pre border border-blue-200">
-            {children}
-          </pre>
-        );
-      }
-      return <p className="mb-2 text-gray-700 leading-relaxed">{children}</p>;
-    },
-    strong: ({ children }: any) => <strong className="font-bold text-gray-800">{children}</strong>,
-    em: ({ children }: any) => <em className="italic text-gray-700">{children}</em>,
-    ul: ({ children }: any) => <ul className="list-disc list-inside mb-2 text-gray-700">{children}</ul>,
-    ol: ({ children }: any) => <ol className="list-decimal list-inside mb-2 text-gray-700">{children}</ol>,
-    li: ({ children }: any) => <li className="mb-1">{children}</li>,
-    pre: ({ children }: any) => (
-      <pre className="font-mono text-sm bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto my-2 whitespace-pre">
-        {children}
-      </pre>
-    ),
-    code: ({ inline, className, children }: any) => {
-      const codeContent = String(children).replace(/\n$/, '');
-      const match = /language-(\w+)/.exec(className || '');
-      const lang = match?.[1] || '';
-
-      if (inline) {
-        return <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-gray-800">{children}</code>;
-      }
-
-      // 检测是否为ASCII艺术/知识结构图
-      if (isAsciiArt(codeContent) || lang === 'diagram' || lang === 'ascii' || lang === 'tree') {
-        return (
-          <div className="my-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
-            <div className="text-xs text-blue-600 font-medium mb-2">知识结构图</div>
-            <pre className="font-mono text-sm text-gray-800 whitespace-pre overflow-x-auto leading-relaxed">
-              {children}
-            </pre>
-          </div>
-        );
-      }
-
-      return <code className="block bg-gray-100 p-2 rounded text-sm font-mono text-gray-800 overflow-x-auto">{children}</code>;
-    },
-    blockquote: ({ children }: any) => (
-      <blockquote className="border-l-4 border-blue-300 pl-3 my-2 text-gray-600 italic">{children}</blockquote>
-    ),
-    table: ({ children }: any) => (
-      <div className="overflow-x-auto my-4 rounded-lg shadow-md border border-gray-200">
-        <table className="w-full border-collapse bg-white">{children}</table>
-      </div>
-    ),
-    thead: ({ children }: any) => <thead className="bg-blue-100">{children}</thead>,
-    tbody: ({ children }: any) => <tbody>{children}</tbody>,
-    th: ({ children }: any) => (
-      <th className="px-4 py-3 text-center text-sm font-bold text-gray-800 border border-gray-300">{children}</th>
-    ),
-    td: ({ children }: any) => (
-      <td className="px-4 py-3 text-center text-sm text-gray-700 border border-gray-300 whitespace-pre-wrap">{children}</td>
-    ),
-    tr: ({ children }: any) => <tr className="bg-white even:bg-gray-50 hover:bg-blue-50 transition-colors duration-200">{children}</tr>,
-  };
-
-  // 混合渲染函数：使用TableRenderer处理表格，ReactMarkdown处理其他内容
-  const renderContentWithTables = (content: string, components: any) => {
-    // 检查内容是否包含表格
-    const hasTable = parseMarkdownTable(content) !== null;
-    
-    if (hasTable) {
-      // 如果包含表格，使用改进的分割逻辑
-      const tableRegex = /^\s*\|(.+)\|\s*\n\s*\|[-\s|:]+\|\s*\n((?:\s*\|.+\|\s*\n?)*)/gm;
-      let lastIndex = 0;
-      const parts = [];
-      let match;
-      
-      // 重置正则表达式的lastIndex
-      tableRegex.lastIndex = 0;
-      
-      while ((match = tableRegex.exec(content)) !== null) {
-        // 添加表格前的内容
-        if (match.index > lastIndex) {
-          const beforeTable = content.substring(lastIndex, match.index).trim();
-          if (beforeTable) {
-            parts.push({ type: 'markdown', content: beforeTable });
-          }
-        }
-        
-        // 添加表格内容
-        parts.push({ type: 'table', content: match[0] });
-        
-        lastIndex = match.index + match[0].length;
-      }
-      
-      // 添加最后一个表格后的内容
-      if (lastIndex < content.length) {
-        const afterTable = content.substring(lastIndex).trim();
-        if (afterTable) {
-          parts.push({ type: 'markdown', content: afterTable });
-        }
-      }
-      
-      return (
-        <>
-          {parts.map((part, index) => {
-            if (part.type === 'table') {
-              return <TableRenderer key={index} content={part.content} />;
-            } else {
-              // 非表格内容使用ReactMarkdown渲染
-              return (
-                <ReactMarkdown
-                  key={index}
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={components}
-                >
-                  {part.content}
-                </ReactMarkdown>
-              );
-            }
-          })}
-        </>
-      );
-    } else {
-      // 如果没有表格，使用ReactMarkdown渲染整个内容
-      return (
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={components}
-        >
-          {content}
-        </ReactMarkdown>
-      );
-    }
-  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -326,8 +169,8 @@ ${context}
                   {message.role === 'user' ? (
                     <div className="whitespace-pre-wrap">{message.content}</div>
                   ) : (
-                    <div className="prose prose-sm max-w-none">
-                      {renderContentWithTables(message.content, customComponents)}
+                    <div className="max-w-none">
+                      <MarkdownRenderer content={message.content} fontSize="sm" />
                     </div>
                   )}
                   <div

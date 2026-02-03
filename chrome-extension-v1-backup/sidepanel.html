@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intelligent Partner</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1>🧠 Intelligent Partner</h1>
+      </div>
+      <div class="header-right">
+        <div class="mode-switcher">
+          <button class="mode-btn active" data-mode="Study">Study</button>
+          <button class="mode-btn" data-mode="Work">Work</button>
+          <button class="mode-btn" data-mode="Brainstorm">Brainstorm</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- World State Card -->
+    <section class="world-state">
+      <div class="state-row">
+        <label class="state-label">Topic</label>
+        <input type="text" id="topic-input" class="state-input" placeholder="当前主题...">
+      </div>
+
+      <div class="state-row">
+        <label class="state-label">Goal</label>
+        <input type="text" id="goal-input" class="state-input" placeholder="我想推进什么？">
+      </div>
+
+      <div class="state-row context-row">
+        <label class="state-label">Context</label>
+        <div class="context-display" id="context-display">
+          <span class="context-title" id="context-title">等待页面...</span>
+          <span class="context-domain" id="context-domain"></span>
+        </div>
+      </div>
+
+      <!-- Recent Signals (collapsible) -->
+      <div class="signals-section" id="signals-section">
+        <button class="signals-toggle" id="signals-toggle">
+          <span>📍 最近浏览</span>
+          <span class="toggle-icon">▼</span>
+        </button>
+        <div class="signals-list" id="signals-list" style="display: none;">
+          <!-- Signals inserted here -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Ask Section -->
+    <section class="ask-section">
+      <div class="ask-input-wrapper">
+        <textarea
+          id="ask-input"
+          class="ask-input"
+          placeholder="我现在想推进什么？有什么问题？"
+          rows="2"
+        ></textarea>
+      </div>
+
+      <div class="intent-buttons">
+        <button class="intent-btn" data-intent="clarify">
+          <span class="intent-icon">🔍</span>
+          <span>Clarify</span>
+        </button>
+        <button class="intent-btn" data-intent="next-steps">
+          <span class="intent-icon">➡️</span>
+          <span>Next Steps</span>
+        </button>
+        <button class="intent-btn" data-intent="brainstorm">
+          <span class="intent-icon">💡</span>
+          <span>Brainstorm</span>
+        </button>
+      </div>
+
+      <!-- Output Area -->
+      <div class="output-area" id="output-area" style="display: none;">
+        <div class="output-section" id="output-conclusion">
+          <div class="output-label">💡 AI 回复</div>
+          <div class="output-content" id="conclusion-content"></div>
+        </div>
+        <!-- 隐藏的兼容元素 -->
+        <div id="output-reasoning" style="display:none;"><div id="reasoning-content"></div></div>
+        <div id="output-actions" style="display:none;"><ul id="actions-list"></ul></div>
+        <div id="output-citations" style="display:none;"><div id="citations-list"></div></div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer" id="footer" style="display: none;">
+      <button class="footer-btn primary" id="save-btn">
+        💾 Save to Web
+      </button>
+      <button class="footer-btn" id="clear-btn">
+        🗑️ Clear
+      </button>
+    </footer>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

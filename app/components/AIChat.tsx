@@ -432,38 +432,6 @@ ${formatted}
     }
   };
 
-  // 格式化AI消息内容
-  const formatAIMessage = (content: string) => {
-    // 注意：表格渲染现在由TableRenderer组件处理
-    let formattedContent = content;
-
-    // 处理Markdown符号 - 使用更安全的正则表达式避免HTML标签冲突
-    
-    // 1. 首先处理代码块符号 ``` - 保持符号可见，显示为蓝色粗体
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)(```)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
-    
-    // 2. 处理行内代码符号 ` - 保持符号可见，显示为蓝色粗体（避免匹配HTML标签内的内容）
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)(?<!`)(\`)(?!`)(?![^<]*>)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
-    
-    // 3. 处理粗体符号 ** - 隐藏符号，显示蓝色粗体文字（避免匹配HTML标签）
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)\*\*([^*<>]+)\*\*(?![^<]*>)/g, '<span style="color: #2563eb; font-weight: bold;">$1</span>');
-    
-    // 4. 处理斜体符号 * - 隐藏符号，显示蓝色斜体文字（避免与列表符号和HTML标签冲突）
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)(?<!\*)\*([^*\n<>]+)\*(?!\*)(?![^<]*>)/g, '<span style="color: #2563eb; font-style: italic;">$1</span>');
-    
-    // 5. 处理标题 - 隐藏符号，只显示黑色粗体标题文字（避免匹配HTML标签）
-    formattedContent = formattedContent.replace(/(?<!<[^>]*)(#{1,6})\s*(.+)$/gm, '<span style="color: #000000; font-weight: bold; font-size: 1.1em;">$2</span>');
-    
-    // 6. 处理有序列表符号 1. 2. 等 - 保持符号可见，显示为蓝色粗体
-    formattedContent = formattedContent.replace(/^(\s*)(\d+\.)\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
-    
-    // 7. 最后处理列表符号 - 和 * - 保持符号可见，显示为蓝色粗体
-    formattedContent = formattedContent.replace(/^(\s*)([-])\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
-    formattedContent = formattedContent.replace(/^(\s*)(\*)\s/gm, '$1<span style="color: #2563eb; font-weight: bold;">$2</span> ');
-
-    return formattedContent;
-  };
-
   // 渲染单条消息
   const renderMessage = (message: MessageItem, index: number) => {
     const contentStr = message.content || ''

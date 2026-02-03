@@ -2,54 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { MessageCircle, X, Send, Minimize2, Maximize2 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
 import { createProviderFromEnv, AIProvider } from '../services/ai'
 import { toast } from 'react-hot-toast'
-import 'katex/dist/katex.min.css'
-
-// 检测是否为ASCII艺术/树状图
-const isAsciiArt = (text: string): boolean => {
-  const asciiArtChars = /[╱╲├│└─┌┐┘┬┴┼═║╔╗╚╝╠╣╦╩╬▲▼◆●○■□★☆→←↑↓↔⇒⇐⇑⇓]/;
-  const hasMultipleSpaces = /\s{2,}/.test(text);
-  const hasBoxDrawing = /[┌┐└┘├┤┬┴┼│─]/.test(text);
-  return asciiArtChars.test(text) || (hasMultipleSpaces && hasBoxDrawing);
-};
-
-// Markdown 自定义组件
-const markdownComponents = {
-  p: ({ children }: any) => {
-    const textContent = typeof children === 'string' ? children :
-      (Array.isArray(children) ? children.map((c: any) => typeof c === 'string' ? c : '').join('') : '');
-    if (isAsciiArt(textContent)) {
-      return <pre className="font-mono text-xs bg-blue-50 p-2 rounded overflow-x-auto my-2 whitespace-pre">{children}</pre>;
-    }
-    return <p className="mb-2 leading-relaxed">{children}</p>;
-  },
-  pre: ({ children }: any) => (
-    <pre className="font-mono text-xs bg-gray-800 text-gray-100 p-2 rounded overflow-x-auto my-2 whitespace-pre">{children}</pre>
-  ),
-  code: ({ inline, className, children }: any) => {
-    const codeContent = String(children).replace(/\n$/, '');
-    if (inline) {
-      return <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>;
-    }
-    if (isAsciiArt(codeContent)) {
-      return (
-        <div className="my-2 bg-blue-50 rounded p-2 border border-blue-200">
-          <pre className="font-mono text-xs whitespace-pre overflow-x-auto">{children}</pre>
-        </div>
-      );
-    }
-    return <code className="block bg-gray-100 p-2 rounded text-xs font-mono overflow-x-auto">{children}</code>;
-  },
-  strong: ({ children }: any) => <strong className="font-semibold text-blue-600">{children}</strong>,
-  ul: ({ children }: any) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-  ol: ({ children }: any) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-  blockquote: ({ children }: any) => <blockquote className="border-l-2 border-blue-300 pl-2 my-2 text-gray-600">{children}</blockquote>,
-};
+import MarkdownRenderer from './MarkdownRenderer'
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -198,15 +153,11 @@ ${context}
                     : 'bg-white border border-gray-200 text-gray-800 shadow-sm'
                 }`}>
                   {msg.role === 'assistant' ? (
-                    <div className="markdown-body prose prose-sm max-w-none">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkMath]}
-                        rehypePlugins={[rehypeKatex]}
-                        components={markdownComponents}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
-                    </div>
+                    <MarkdownRenderer 
+                      content={msg.content} 
+                      fontSize="sm"
+                      className="bg-transparent"
+                    />
                   ) : (
                     msg.content
                   )}

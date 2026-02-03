@@ -72,6 +72,7 @@ DATABASE_URL=postgresql://username:password@host:port/database?schema=public
 OPENAI_API_KEY=sk-your-deepseek-api-key
 OPENAI_BASE_URL=https://api.deepseek.com/v1
 OPENAI_MODEL=deepseek-chat
+# 可选：deepseek-reasoner
 
 # 认证配置
 NEXTAUTH_URL=https://your-project.vercel.app

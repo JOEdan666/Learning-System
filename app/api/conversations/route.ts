@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { cookies } from 'next/headers';
 import { randomUUID } from 'crypto';
-// 绕过单例，强制使用新实例以解决开发环境 Schema 缓存问题
-import { PrismaClient } from '@/app/generated/prisma';
+import { prisma } from '@/app/lib/prisma';
 import { memoryDB } from '@/app/lib/memory-db';
-
-const prisma = new PrismaClient();
 
 // 允许在数据库或鉴权不可用时回退；生产环境也默认开启
 const MEMORY_FALLBACK_ENABLED =
@@ -139,13 +136,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '未授权' }, { status: 401 });
     }
 
+    // 确保 messages 是合法的 JSON 数组，Prisma 需要 JSON 兼容的数据
+    // 在这里我们显式地将其转换为对象数组，虽然它已经是数组，但为了类型安全
     const messages = initialMessage ? [initialMessage] : [];
+    const safeMessages = Array.isArray(messages) ? messages : [];
+
     const createData: any = {
       userId,
       title: title || (type === 'learning' ? `${subject} - ${topic}` : '新对话'),
       type: type || 'general',
-      messages,
-      messageCount: messages.length,
+      messages: safeMessages,
+      messageCount: safeMessages.length,
       subject,
       topic,
       aiExplanation,
@@ -200,6 +201,9 @@ export async function POST(req: NextRequest) {
             existing.id,
             {
               messages: initialMessage ? [...(existing.messages || []), initialMessage] : existing.messages,
+              messageCount: initialMessage
+                ? (existing.messageCount || 0) + 1
+                : existing.messageCount,
               aiExplanation: aiExplanation || existing.aiExplanation,
             },
             userId,
@@ -210,12 +214,15 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      console.log('Creating conversation with data:', JSON.stringify(createData, null, 2));
       const conversation = await prisma.conversation.create({
         data: createData,
         include: { learningSession: true },
       });
+      console.log('Conversation created successfully:', conversation.id);
       return respond(conversation, shouldSetCookie, userId);
     } catch (dbError: any) {
+      console.error('Database error during conversation creation:', dbError);
       if (MEMORY_FALLBACK_ENABLED && isDbUnavailable(dbError)) {
         console.warn('🚨 [POST] DB 不可用，使用内存数据库');
         const conversation = await memoryDB.createConversation(createData);

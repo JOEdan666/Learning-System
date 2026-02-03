@@ -1,10 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import MarkdownRenderer from '../MarkdownRenderer';
 import { Download, Camera, CheckCircle, RefreshCcw, ArrowRight, Lightbulb, BookOpen } from 'lucide-react';
-import 'katex/dist/katex.min.css';
 
 interface ReviewStepProps {
   content: string;
@@ -157,13 +153,10 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
             <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-sm font-bold mb-4">
               变式题挑战 ({grade}难度)
             </span>
-            <div className="prose prose-slate max-w-none mb-6">
-              <ReactMarkdown 
-                remarkPlugins={[remarkGfm, remarkMath]} 
-                rehypePlugins={[rehypeKatex]}
-              >
-                {verificationQuestion.question}
-              </ReactMarkdown>
+            <div className="mb-6">
+              <MarkdownRenderer 
+                content={verificationQuestion.question}
+              />
             </div>
             
             <textarea
@@ -200,13 +193,11 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
                     <Lightbulb className="w-5 h-5 text-yellow-500" />
                     参考答案
                   </h4>
-                  <div className="text-slate-700 prose prose-sm max-w-none bg-white p-4 rounded-lg border border-slate-100">
-                     <ReactMarkdown 
-                      remarkPlugins={[remarkGfm, remarkMath]} 
-                      rehypePlugins={[rehypeKatex]}
-                    >
-                      {verificationQuestion.referenceAnswer}
-                    </ReactMarkdown>
+                  <div className="bg-white p-4 rounded-lg border border-slate-100">
+                     <MarkdownRenderer 
+                      content={verificationQuestion.referenceAnswer}
+                      fontSize="sm"
+                    />
                   </div>
                 </div>
 
@@ -215,13 +206,11 @@ const ReviewStep: React.FC<ReviewStepProps> = ({
                     <BookOpen className="w-5 h-5 text-blue-600" />
                     解析与思路
                   </h4>
-                   <div className="text-slate-700 prose prose-sm max-w-none">
-                     <ReactMarkdown 
-                      remarkPlugins={[remarkGfm, remarkMath]} 
-                      rehypePlugins={[rehypeKatex]}
-                    >
-                      {verificationQuestion.explanation}
-                    </ReactMarkdown>
+                   <div className="text-slate-700">
+                     <MarkdownRenderer 
+                      content={verificationQuestion.explanation}
+                      fontSize="sm"
+                    />
                   </div>
                 </div>
 

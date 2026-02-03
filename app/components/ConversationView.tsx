@@ -1,15 +1,12 @@
 'use client'
 
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import remarkGfm from 'remark-gfm';
 import { ConversationHistory } from '../types/conversation';
 import { ChatMessage, Role } from '../utils/chatTypes';
 import { ConversationService } from '../services/conversationService';
 import { createProviderFromEnv } from '../services/ai';
 import type { AIProvider } from '../services/ai';
+import MarkdownRenderer from './MarkdownRenderer';
 
 interface ConversationViewProps {
   conversation: ConversationHistory;
@@ -265,11 +262,11 @@ export default function ConversationView({
                     : 'bg-gray-100 text-gray-900'
                 }`}
               >
-                <div className="markdown-body break-words">
-                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                    {message.content}
-                  </ReactMarkdown>
-                </div>
+                {message.role === 'user' ? (
+                  <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                ) : (
+                  <MarkdownRenderer content={message.content} fontSize="sm" />
+                )}
                 <div
                   className={`text-xs mt-1 ${
                     message.role === 'user' ? 'text-blue-100' : 'text-gray-500'

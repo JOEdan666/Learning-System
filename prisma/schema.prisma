@@ -130,7 +130,7 @@ model KnowledgeChunk {
   content   String
   // Use Unsupported type for pgvector. 
   // IMPORTANT: You must run `CREATE EXTENSION IF NOT EXISTS vector;` in your DB.
-  vector    Unsupported("vector(1536)")?
+  // vector    Unsupported("vector(1536)")?
   
   // Metadata
   type      String   // ChunkType: SYLLABUS, EXAM_PROFILE, TEMPLATE, PITFALL
@@ -316,4 +316,71 @@ model NoteBlock {
 
   @@index([noteId, order])
   @@map("note_blocks")
+}
+
+// --- Intelligent Partner ---
+
+model PartnerSession {
+  id               String   @id @default(cuid())
+  userId           String?  // 登录用户
+  guestId          String?  // 游客标识
+
+  mode             String   @default("Study") // Study | Work | Brainstorm
+  topic            String?
+  goal             String?
+
+  pageUrl          String?
+  pageTitle        String?
+  pageDomain       String?
+  contextSnippet   String?  @db.Text
+
+  recentSignalsJson String? @db.Text // JSON string
+
+  status           String   @default("draft") // draft | saved | archived
+
+  messages         PartnerMessage[]
+  assets           PartnerAsset[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId])
+  @@index([guestId])
+  @@index([status])
+  @@index([pageDomain])
+}
+
+model PartnerMessage {
+  id            String   @id @default(cuid())
+  sessionId     String
+  session       PartnerSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  role          String   // user | assistant
+  content       String   @db.Text // 纯文本内容
+  contentJson   String?  @db.Text // 结构化 JSON（tldr/reasoning/actions/citations）
+  citationsJson String?  @db.Text // 引用 JSON
+
+  createdAt     DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+model PartnerAsset {
+  id             String   @id @default(cuid())
+  sessionId      String
+  session        PartnerSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  type           String   // insight | action | idea | risk | summary
+  title          String
+  contentJson    String   @db.Text // 资产内容 JSON
+  actionItemsJson String? @db.Text // 行动项（带 checked 状态）
+  citationsJson  String?  @db.Text
+
+  status         String   @default("draft") // draft | saved
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([sessionId])
+  @@index([type])
 }

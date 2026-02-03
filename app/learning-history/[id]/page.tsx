@@ -2,10 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
+import MarkdownRenderer from '@/app/components/MarkdownRenderer'
 import { ArrowLeft, BookOpen, CheckCircle, XCircle, AlertCircle, HelpCircle } from 'lucide-react'
 import FloatingChatWidget from '@/app/components/FloatingChatWidget'
 
@@ -165,14 +162,7 @@ Explanation: ${q.explanation}
               <h2 className="font-semibold text-blue-900">知识点讲解</h2>
             </div>
             <div className="p-6 md:p-8">
-              <div className="markdown-body prose max-w-none prose-blue">
-                <ReactMarkdown 
-                  remarkPlugins={[remarkGfm, remarkMath]} 
-                  rehypePlugins={[rehypeKatex]}
-                >
-                  {session.aiExplanation}
-                </ReactMarkdown>
-              </div>
+              <MarkdownRenderer content={session.aiExplanation} fontSize="lg" />
             </div>
           </section>
         )}
@@ -245,7 +235,10 @@ Explanation: ${q.explanation}
                         {q.explanation && (
                           <div className="mt-4 bg-gray-50 p-4 rounded-lg text-sm text-gray-700">
                             <span className="font-bold block mb-1 text-gray-900">解析：</span>
-                            <ReactMarkdown>{q.explanation}</ReactMarkdown>
+                            <MarkdownRenderer 
+                              content={q.explanation}
+                              fontSize="sm"
+                            />
                           </div>
                         )}
                       </div>

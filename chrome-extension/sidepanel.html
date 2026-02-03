@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>认知透镜</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 紧凑顶栏 -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="rgba(255,255,255,0.2)"/>
+            <path d="M12 6v6l4 2" stroke="white" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <span class="brand-title">认知透镜</span>
+      </div>
+      <div class="status-pill" id="session-pill">草稿</div>
+    </header>
+
+    <!-- 认知视角状态栏（CSS隐藏） -->
+    <div class="cognitive-lens-bar" id="lens-bar">
+      <div class="lens-indicator">
+        <span class="lens-dot"></span>
+        <span class="lens-label">当前视角</span>
+      </div>
+      <div class="lens-value" id="lens-value">逻辑解构</div>
+    </div>
+
+    <main class="app-main">
+      <!-- 页面上下文 - 精简单行 -->
+      <section class="context-card">
+        <div class="context-page">
+          <span class="context-title" id="context-title">等待页面...</span>
+          <a class="context-link" id="context-link" target="_blank" rel="noreferrer">
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M3.5 3a.5.5 0 0 0 0 1h3.793L3.146 8.146a.5.5 0 1 0 .708.708L8 4.707V8.5a.5.5 0 0 0 1 0v-5a.5.5 0 0 0-.5-.5h-5Z"/>
+            </svg>
+          </a>
+        </div>
+        <div class="context-domain" id="context-domain"></div>
+      </section>
+
+      <!-- 设置区（CSS隐藏） -->
+      <details class="settings-panel">
+        <summary class="settings-toggle">
+          <span>设置</span>
+          <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4.646 6.646a.5.5 0 0 1 .708 0L8 9.293l2.646-2.647a.5.5 0 0 1 .708.708l-3 3a.5.5 0 0 1-.708 0l-3-3a.5.5 0 0 1 0-.708z"/>
+          </svg>
+        </summary>
+        <div class="settings-body">
+          <div class="setting-row">
+            <label>模式</label>
+            <select class="select-input" id="mode-select">
+              <option value="Study">学习</option>
+              <option value="Work">工作</option>
+              <option value="Brainstorm">脑暴</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>主题</label>
+            <div class="input-with-action">
+              <input id="topic-input" class="text-input" type="text" placeholder="自动识别" />
+              <button class="icon-btn" id="topic-refresh" title="重新识别">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
+                  <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label>目标</label>
+            <input id="goal-input" class="text-input" type="text" placeholder="想了解什么？" />
+          </div>
+        </div>
+      </details>
+
+      <!-- 快捷按钮 - 紧凑版 -->
+      <section class="quick-actions">
+        <div class="actions-grid" id="suggestions-list"></div>
+      </section>
+
+      <!-- 输入区 -->
+      <section class="input-section">
+        <textarea id="ask-input" class="ask-input" rows="1" placeholder="输入问题..."></textarea>
+        <button class="send-btn" id="ask-submit">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+          </svg>
+        </button>
+      </section>
+
+      <!-- 输出区 - 主要区域 -->
+      <section class="output-section" id="output-panel">
+        <div class="output-empty" id="output-empty">
+          <div class="empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="#1890ff" stroke-width="1.5" opacity="0.3"/>
+              <path d="M9 9l6 6M15 9l-6 6" stroke="#1890ff" stroke-width="1.5" stroke-linecap="round" opacity="0.2"/>
+              <path d="M12 8v4l3 1.5" stroke="#1890ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <p class="empty-greeting" id="empty-greeting">选择认知视角，开始探索</p>
+          <p class="empty-hint">点击上方按钮或直接输入问题</p>
+        </div>
+        <div class="output-content" id="output-content">
+          <div class="output-markdown" id="output-markdown" hidden></div>
+          <div class="follow-up-container" id="follow-up-container" hidden></div>
+        </div>
+        <div class="loading-state" id="loading-state" hidden>
+          <div class="loading-spinner"></div>
+          <p class="loading-text" id="loading-text">正在思考...</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- 底部栏 -->
+    <footer class="app-footer">
+      <button class="footer-btn save-btn" id="save-btn">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M2 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4.414a1 1 0 0 0-.293-.707l-2.414-2.414A1 1 0 0 0 11.586 1H2zm3 4a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 5zm0 3a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 8z"/>
+        </svg>
+        保存
+      </button>
+      <button class="footer-btn clear-btn" id="clear-btn">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+          <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1z"/>
+        </svg>
+        清空
+      </button>
+      <div class="status-text" id="save-status"></div>
+      <a class="footer-link" href="https://learning-system-inky-zeta.vercel.app/" target="_blank" rel="noreferrer">
+        <svg viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
+          <path d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
+        </svg>
+        网页版
+      </a>
+    </footer>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

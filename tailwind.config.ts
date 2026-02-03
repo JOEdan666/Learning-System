@@ -20,8 +20,36 @@ const config: Config = {
       fontFamily: {
         inter: ['Inter', 'sans-serif'],
       },
+      typography: (theme: any) => ({
+        DEFAULT: {
+          css: {
+            lineHeight: '1.75',
+            code: {
+              backgroundColor: theme('colors.gray.100'),
+              color: theme('colors.gray.800'),
+              padding: '0.2rem 0.35rem',
+              borderRadius: '0.375rem',
+              fontWeight: '500',
+            },
+            'code::before': { content: '""' },
+            'code::after': { content: '""' },
+          },
+        },
+        invert: {
+          css: {
+            code: {
+              backgroundColor: theme('colors.gray.800'),
+              color: theme('colors.gray.100'),
+            },
+            'code::before': { content: '""' },
+            'code::after': { content: '""' },
+          },
+        },
+      }),
     },
   },
-  plugins: [],
+  plugins: [
+    require('@tailwindcss/typography'),
+  ],
 }
 export default config

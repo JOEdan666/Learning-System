@@ -40,7 +40,7 @@
 | `DATABASE_URL` | PostgreSQL数据库连接 | `postgresql://user:pass@host:5432/db` |
 | `OPENAI_API_KEY` | DeepSeek API密钥 | `sk-xxx` |
 | `OPENAI_BASE_URL` | DeepSeek API地址 | `https://api.deepseek.com/v1` |
-| `OPENAI_MODEL` | AI模型名称 | `deepseek-chat` |
+| `OPENAI_MODEL` | AI模型名称 | `deepseek-chat / deepseek-reasoner` |
 | `NEXTAUTH_URL` | 应用域名 | `https://your-app.vercel.app` |
 | `NEXTAUTH_SECRET` | 认证密钥 | 随机字符串 |
 

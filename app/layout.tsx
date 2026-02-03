@@ -42,9 +42,12 @@ export default function RootLayout({
           <ErrorBoundary>
             <AntdRegistry>
               <ThemeProvider>
-                <MainLayout>
-                  {children}
-                </MainLayout>
+                {/* 使用 suppressHydrationWarning 消除某些插件或扩展导致的不匹配警告 */}
+                <div suppressHydrationWarning>
+                  <MainLayout>
+                    {children}
+                  </MainLayout>
+                </div>
               </ThemeProvider>
             </AntdRegistry>
           </ErrorBoundary>

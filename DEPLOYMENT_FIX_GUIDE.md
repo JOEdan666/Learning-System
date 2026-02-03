@@ -86,6 +86,7 @@ sudo systemctl restart your-service
 OPENAI_API_KEY=sk-your-real-api-key-here
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_MODEL=deepseek-chat
+# 可选：deepseek-reasoner
 
 # 应用配置
 NODE_ENV=production

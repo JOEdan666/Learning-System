@@ -325,7 +325,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
 
   // 初始化AI Provider（仅初始化一次，避免重复注册导致多次回调）
   // 更强大的前缀过滤，覆盖AI可能使用的各种变体
-  const stripKnowledgePrefix = useCallback((content: string) => {
+  const stripKnowledgePrefix = useCallback((content: string, mode: 'stream' | 'final' = 'final') => {
     if (!content) return '';
     // 多种前缀模式依次过滤
     const patterns = [
@@ -339,7 +339,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
     for (const pattern of patterns) {
       result = result.replace(pattern, '');
     }
-    return result.trim();
+    return mode === 'stream' ? result : result.trim();
   }, []);
 
   useEffect(() => {
@@ -389,7 +389,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
         
         setMessages(prev => {
           const lastMessage = prev[prev.length - 1];
-          const validContent = stripKnowledgePrefix(content || '');
+          const validContent = stripKnowledgePrefix(content || '', 'stream');
           
           // 避免在最终空内容事件或空增量时创建空消息
           if (validContent.length === 0 && (!lastMessage || lastMessage.role !== 'assistant')) {
@@ -406,7 +406,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
             return [...prev.slice(0, -1), updatedMessage];
           } else {
              // 添加新的助手消息
-             const newMessage: ChatMessage = { role: 'assistant', content: stripKnowledgePrefix(validContent) };
+             const newMessage: ChatMessage = { role: 'assistant', content: validContent };
              return [...prev, newMessage];
            }
         });
@@ -753,12 +753,18 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
         {/* 顶部导航栏 */}
         <div className="sticky top-0 z-10 flex items-center p-3 bg-white/70 backdrop-blur-xl border-b border-blue-100/50 shadow-sm lg:hidden">
           <button
-            onClick={() => setIsSidebarOpen(true)}
+            onClick={() => setIsSidebarOpen(prev => !prev)}
             className="p-2 hover:bg-blue-50 rounded-lg text-gray-600 transition-colors"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+            {isSidebarOpen ? (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            ) : (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            )}
           </button>
           <span className="ml-3 font-semibold text-gray-800 truncate">
             {selectedConversation?.title || '新对话'}
@@ -766,17 +772,21 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
         </div>
 
         {/* 桌面端侧边栏切换按钮 */}
-        {!isSidebarOpen && (
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="absolute top-4 left-4 z-10 p-2.5 text-gray-600 hover:text-blue-600 rounded-xl bg-white/80 backdrop-blur shadow-lg shadow-blue-100/30 hover:shadow-xl border border-blue-100 hidden lg:flex items-center justify-center transition-all"
-            title="显示侧边栏"
-          >
+        <button
+          onClick={() => setIsSidebarOpen(prev => !prev)}
+          className="absolute top-4 left-4 z-10 p-2.5 text-gray-600 hover:text-blue-600 rounded-xl bg-white/80 backdrop-blur shadow-lg shadow-blue-100/30 hover:shadow-xl border border-blue-100 hidden lg:flex items-center justify-center transition-all"
+          title={isSidebarOpen ? '收起边栏' : '显示侧边栏'}
+        >
+          {isSidebarOpen ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          ) : (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
-          </button>
-        )}
+          )}
+        </button>
 
         {selectedConversation ? (
           <>
@@ -832,7 +842,7 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
                 )}
 
                 {messages.map((message, index) => {
-                  const sanitized = message.role === 'assistant' ? stripKnowledgePrefix(message.content) : message.content;
+                  const sanitized = message.role === 'assistant' ? stripKnowledgePrefix(message.content, 'final') : message.content;
                   const isUser = message.role === 'user';
                   return (
                     <div

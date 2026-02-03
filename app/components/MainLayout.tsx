@@ -30,7 +30,7 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
     { key: '/unified-chat', label: 'AI对话' },
     { key: '/learning-history', label: '自学历史' },
     { key: '/knowledge-base', label: '知识库' },
-    { key: '/wrong-book', label: '错题本' },
+    { key: '/wrong-book', label: '错题库' },
   ];
 
   // 简单的路由匹配逻辑，高亮当前菜单

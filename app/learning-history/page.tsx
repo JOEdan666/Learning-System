@@ -2,14 +2,11 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Clock, Book, AlertCircle, FileText, ChevronRight } from 'lucide-react'
 import { SessionCardSkeleton, NoteCardSkeleton } from '../components/ui/Skeleton'
 import LearningDashboard from '../components/analytics/LearningDashboard'
+import MarkdownRenderer from '../components/MarkdownRenderer'
 
 interface LearningSession {
   id: string
@@ -242,7 +239,11 @@ export default function LearningHistoryPage() {
                       
                       {answer.question && (
                         <div className="space-y-4">
-                          <div className="font-medium text-gray-900">{answer.question.question}</div>
+                          <MarkdownRenderer
+                            content={answer.question.question}
+                            fontSize="sm"
+                            className="!prose-p:my-1 !prose-h1:mt-3 !prose-h2:mt-3 !prose-h3:mt-2"
+                          />
                           <div className="grid grid-cols-2 gap-4 text-sm">
                             <div className="bg-red-50 p-3 rounded-lg border border-red-100">
                               <span className="block text-red-600 text-xs mb-1">你的答案</span>
@@ -254,9 +255,13 @@ export default function LearningHistoryPage() {
                             </div>
                           </div>
                           {answer.question.explanation && (
-                            <div className="bg-gray-50 p-3 rounded-lg text-sm text-gray-600">
-                              <span className="font-medium text-gray-900 mr-2">解析:</span>
-                              {answer.question.explanation}
+                            <div className="bg-gray-50 p-3 rounded-lg text-sm text-gray-700">
+                              <div className="font-medium text-gray-900 mb-1">解析:</div>
+                              <MarkdownRenderer
+                                content={answer.question.explanation}
+                                fontSize="sm"
+                                className="!prose-p:my-1 !prose-h1:mt-3 !prose-h2:mt-3 !prose-h3:mt-2"
+                              />
                             </div>
                           )}
                         </div>
