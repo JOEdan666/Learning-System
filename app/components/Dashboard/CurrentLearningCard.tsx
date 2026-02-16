@@ -16,13 +16,14 @@ export default function CurrentLearningCard() {
     // 获取最近的学习会话
     const fetchLatestSession = async () => {
       try {
-        // 使用静态方法获取对话列表
-        const conversations = await ConversationService.getAllConversations()
+        // 使用实例方法获取对话列表
+        const result = await ConversationService.getInstance().getConversations({ type: 'learning', limit: 10 })
+        const conversations = result.conversations
         
-        // 筛选出学习类型的会话，并按最后活动时间排序
+        // 筛选出有学习会话且未归档的，按最后活动时间排序
         const learningSessions = conversations
-          .filter(c => c.type === 'learning' && !c.isArchived && c.learningSession)
-          .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime())
+          .filter((c: ConversationHistory) => !c.isArchived && c.learningSession)
+          .sort((a: ConversationHistory, b: ConversationHistory) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime())
         
         if (learningSessions.length > 0) {
           setLatestSession(learningSessions[0])

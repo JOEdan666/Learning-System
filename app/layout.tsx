@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { Metadata } from 'next'
 import { ClerkProvider } from '@clerk/nextjs'
 import './globals.css'
@@ -15,7 +14,6 @@ export const metadata: Metadata = {
   openGraph: {
     title: '智学引擎',
     description: 'AI驱动的个性化学习系统，精准诊断、智能讲解、高效提分',
-    url: 'http://localhost:3003/',
     siteName: '智学引擎',
     images: [
       { url: '/intelligent.jpg', width: 1200, height: 630, alt: '智学引擎' }
@@ -36,7 +34,7 @@ export default function RootLayout({
         {/* 使用系统字体，避免构建时联网下载 Google Fonts 导致 ECONNRESET */}
         <body className="min-h-screen bg-slate-50 font-sans">
           <script type="application/ld+json" dangerouslySetInnerHTML={{__html: JSON.stringify({
-            '@context':'https://schema.org', '@type':'WebSite', name:'智学引擎', url:'http://localhost:3003/',
+            '@context':'https://schema.org', '@type':'WebSite', name:'智学引擎',
           })}} />
           
           <ErrorBoundary>

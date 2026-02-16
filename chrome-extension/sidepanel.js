@@ -727,8 +727,24 @@
       }
     };
 
+    // 预处理：修复常见的 AI 输出格式问题
+    const preprocessLine = (line) => {
+      let processed = line;
+      // 修复 "*2. 内容" -> "2. 内容"
+      processed = processed.replace(/^\s*\*(\d+\.)\s*/, '$1 ');
+      // 修复 "* 2. 内容" -> "2. 内容"
+      processed = processed.replace(/^\s*\*\s+(\d+\.)\s*/, '$1 ');
+      // 修复 "-2. 内容" -> "2. 内容"
+      processed = processed.replace(/^\s*-(\d+\.)\s*/, '$1 ');
+      // 修复 "1.内容" -> "1. 内容"
+      processed = processed.replace(/^(\d+\.)(?!\s)/, '$1 ');
+      // 修复 "-内容" -> "- 内容"
+      processed = processed.replace(/^([-*])(?!\s)/, '$1 ');
+      return processed;
+    };
+
     lines.forEach(line => {
-      const trimmed = line.trim();
+      const trimmed = preprocessLine(line.trim());
       if (!trimmed) {
         closeLists();
         return;
@@ -742,9 +758,9 @@
         return;
       }
 
-      if (/^>\s+/.test(trimmed)) {
+      if (/^>\s*/.test(trimmed)) {
         closeLists();
-        html += `<blockquote>${applyInlineMarkdown(trimmed.replace(/^>\s+/, ''))}</blockquote>`;
+        html += `<blockquote>${applyInlineMarkdown(trimmed.replace(/^>\s*/, ''))}</blockquote>`;
         return;
       }
 

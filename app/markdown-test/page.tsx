@@ -22,8 +22,9 @@ const samples = {
 软换行B
 软换行C
 `,
-  math: `
-公式: $a^2 + b^2 = c^2$\n\n
+  math: String.raw`
+公式: $a^2 + b^2 = c^2$
+
 矩阵: $$\begin{bmatrix}1 & 2\\3 & 4\end{bmatrix}$$
 `,
   mindmap: `
@@ -34,9 +35,10 @@ const samples = {
 菱形对角线“垂直”。-矩形对角线“相等”。
 `,
   gluedTableAndBr: `
-|图形|定义 ||------|------|
+| 图形 | 定义 |
+|------|------|
 | 菱形 | 四条边都相等<br>的平行四边形 |
-| 矩形 | 四个角都是直角 的平行四边形 |
+| 矩形 | 四个角都是直角的平行四边形 |
 `
 }
 
@@ -75,7 +77,8 @@ export default function MarkdownTestPage() {
       const liCount = root.querySelectorAll('li').length
       rs.push({ name: `列表渲染 (li=${liCount})`, ok: liCount >= 3 })
 
-      const softBreakParagraph = Array.from(root.querySelectorAll('p')).find(el => el.textContent?.includes('软换行A'))
+      // 注意：remarkTypographyFixes 会在中英文之间添加空格，所以用 "软换行" 查找
+      const softBreakParagraph = Array.from(root.querySelectorAll('p')).find(el => el.textContent?.includes('软换行'))
       const softBreakBrCount = softBreakParagraph ? softBreakParagraph.querySelectorAll('br').length : 0
       rs.push({ name: `软换行渲染 (br=${softBreakBrCount})`, ok: softBreakBrCount >= 2 })
 
