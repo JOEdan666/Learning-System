@@ -1,10 +1,11 @@
 'use client'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { CURRICULUM_DATABASE } from '../data/curriculumDatabase'
+import { LazyMotion, domAnimation, m } from 'framer-motion'
 import { Zap, ChevronDown, BookOpen, GraduationCap, Calendar, Target, Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+import type { CurriculumStandard } from '../types/curriculum'
 
 export default function QuickStart() {
   const router = useRouter()
@@ -12,14 +13,24 @@ export default function QuickStart() {
   const [semester, setSemester] = useState('')
   const [subject, setSubject] = useState('')
   const [topicId, setTopicId] = useState('')
+  const [curriculumDB, setCurriculumDB] = useState<CurriculumStandard[]>([])
 
   const grades = ['四年级', '五年级', '六年级', '七年级', '八年级', '九年级', '高一', '高二', '高三']
   const semesters = ['上册', '下册']
   const subjects = ['语文', '数学', '物理', '英语', '历史', '化学', '政治', '生物', '地理']
 
+  // 动态加载课程数据库：仅在用户选择年级+学科后才加载
+  useEffect(() => {
+    if (grade && subject) {
+      import('../data/curriculumDatabase').then(mod => {
+        setCurriculumDB(mod.CURRICULUM_DATABASE)
+      })
+    }
+  }, [grade, subject])
+
   const availableTopics = useMemo(() => {
-    if (!grade || !subject) return []
-    const standards = CURRICULUM_DATABASE.filter(c =>
+    if (!grade || !subject || curriculumDB.length === 0) return []
+    const standards = curriculumDB.filter(c =>
       c.grade.includes(grade) &&
       c.subject.includes(subject) &&
       (!semester || !c.semester || c.semester === semester)
@@ -27,7 +38,7 @@ export default function QuickStart() {
     const allTopics = standards.flatMap(s => s.topics)
     const uniqueTopics = Array.from(new Map(allTopics.map(item => [item.name, item])).values())
     return uniqueTopics
-  }, [grade, subject, semester])
+  }, [grade, subject, semester, curriculumDB])
 
   const handleStart = () => {
     if (!grade || !subject) {
@@ -98,10 +109,11 @@ export default function QuickStart() {
   )
 
   return (
+    <LazyMotion features={domAnimation}>
     <section id="quick-start" className="py-20 bg-slate-50">
       <div className="max-w-4xl mx-auto px-6">
         {/* Section Header */}
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
@@ -117,10 +129,10 @@ export default function QuickStart() {
           <p className="text-gray-500 text-lg max-w-md mx-auto">
             选择年级和学科，AI将为你定制专属学习方案
           </p>
-        </motion.div>
+        </m.div>
 
         {/* Selection Card */}
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
@@ -204,8 +216,9 @@ export default function QuickStart() {
               </p>
             </div>
           </div>
-        </motion.div>
+        </m.div>
       </div>
     </section>
+    </LazyMotion>
   )
 }

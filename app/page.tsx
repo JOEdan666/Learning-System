@@ -1,7 +1,9 @@
 'use client'
+import dynamic from 'next/dynamic'
 import HeroSection from './components/HeroSection'
-import QuickStart from './components/QuickStart'
-import FeaturesGrid from './components/FeaturesGrid'
+
+const QuickStart = dynamic(() => import('./components/QuickStart'))
+const FeaturesGrid = dynamic(() => import('./components/FeaturesGrid'))
 
 export default function Home() {
   return (

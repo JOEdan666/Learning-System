@@ -1,8 +1,10 @@
 'use client'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { motion } from 'framer-motion'
 import { Sparkles, Brain, Target, Rocket, CheckCircle, TrendingUp, Clock } from 'lucide-react'
-import CurrentLearningCard from './Dashboard/CurrentLearningCard'
+
+const CurrentLearningCard = dynamic(() => import('./Dashboard/CurrentLearningCard'), { ssr: false })
 
 export default function HeroSection() {
   const features = [

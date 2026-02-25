@@ -5,7 +5,6 @@ import { Layout, Menu, theme, ConfigProvider } from 'antd';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Brain } from 'lucide-react';
 
 const { Header, Content, Footer } = Layout;
@@ -125,18 +124,21 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
           </div>
         </Header>
         <Content style={{ background: '#f8fafc' }}>
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={pathname}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2, ease: 'easeInOut' }}
-              style={{ minHeight: '100%' }}
-            >
-              {children}
-            </motion.div>
-          </AnimatePresence>
+          <div
+            key={pathname}
+            style={{
+              minHeight: '100%',
+              animation: 'fadeIn 0.2s ease-in-out',
+            }}
+          >
+            {children}
+          </div>
+          <style jsx global>{`
+            @keyframes fadeIn {
+              from { opacity: 0; transform: translateY(8px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+          `}</style>
         </Content>
       </Layout>
     </ConfigProvider>

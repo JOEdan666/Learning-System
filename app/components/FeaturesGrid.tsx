@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import { motion } from 'framer-motion'
+import { LazyMotion, domAnimation, m } from 'framer-motion'
 import {
   Database,
   History,
@@ -57,10 +57,11 @@ const stats = [
 
 export default function FeaturesGrid() {
   return (
+    <LazyMotion features={domAnimation}>
     <section className="py-20 bg-white">
       <div className="max-w-6xl mx-auto px-6">
         {/* Section Header */}
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
@@ -75,12 +76,12 @@ export default function FeaturesGrid() {
           <p className="text-gray-500 text-lg max-w-md mx-auto">
             多维度功能支持，打造高效学习闭环
           </p>
-        </motion.div>
+        </m.div>
 
         {/* Features Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
           {features.map((feature, index) => (
-            <motion.div
+            <m.div
               key={feature.title}
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
@@ -110,12 +111,12 @@ export default function FeaturesGrid() {
                   <ArrowRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
                 </div>
               </Link>
-            </motion.div>
+            </m.div>
           ))}
         </div>
 
         {/* Bottom Stats */}
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
@@ -148,8 +149,9 @@ export default function FeaturesGrid() {
               ))}
             </div>
           </div>
-        </motion.div>
+        </m.div>
       </div>
     </section>
+    </LazyMotion>
   )
 }
