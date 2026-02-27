@@ -1,4 +1,5 @@
-# 智学引擎 (Learning Engine)
+# 智学引擎 (Learning Engine) 【INtelligent OS】
+**Developed by JOEdan**
 
 **一个 AI 驱动的结构化自学系统，用可验证的学习闭环替代低效的一对一辅导。**
 
