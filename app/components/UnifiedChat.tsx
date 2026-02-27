@@ -533,15 +533,9 @@ export default function UnifiedChat({ onClose, savedItems }: UnifiedChatProps) {
     prevMessagesLengthRef.current = messages.length;
   }, [messages.length, scrollToBottom]);
 
-  // UI渲染 - 浅蓝色现代化风格
+  // UI渲染 - 极简中性色
   return (
-    <div className="flex h-[calc(100vh-64px)] bg-gradient-to-br from-sky-50 via-sky-100/50 to-blue-100 overflow-hidden">
-      {/* 装饰性背景元素 */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-[10%] w-72 h-72 bg-blue-200/30 rounded-full blur-3xl" />
-        <div className="absolute bottom-20 right-[15%] w-96 h-96 bg-sky-200/40 rounded-full blur-3xl" />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(59,130,246,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(59,130,246,0.03)_1px,transparent_1px)] bg-[size:60px_60px]" />
-      </div>
+    <div className="flex h-[calc(100vh-64px)] bg-slate-100 overflow-hidden">
 
       {/* 移动端遮罩 */}
       {isSidebarOpen && (

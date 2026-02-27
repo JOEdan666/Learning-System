@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, ArrowRight, Activity, Clock, PlayCircle } from 'lucide-react'
+import { ArrowRight, Activity, Clock, PlayCircle } from 'lucide-react'
 import { ConversationService } from '../../services/conversationService'
 import { ConversationHistory } from '../../types/conversation'
 import { STEP_METADATA } from '../../types/learning'
@@ -63,14 +63,14 @@ export default function CurrentLearningCard() {
   }
 
   return (
-    <div className="w-full max-w-4xl mx-auto mb-12">
-      <div className="bg-white rounded-2xl shadow-xl shadow-blue-900/5 border border-blue-100 overflow-hidden transform transition-all hover:scale-[1.01] duration-300">
+    <div className="w-full max-w-4xl mx-auto">
+      <div className="zen-panel overflow-hidden transition-transform duration-300 hover:-translate-y-0.5">
         <div className="p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           
           {/* 左侧信息 */}
           <div className="flex-1 space-y-4">
             <div className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold tracking-wide uppercase">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-50 text-sky-700 text-xs font-semibold tracking-wide uppercase">
                 <Activity className="w-3.5 h-3.5" />
                 正在进行
               </span>
@@ -85,14 +85,14 @@ export default function CurrentLearningCard() {
                 {latestSession.subject} · {latestSession.topic}
               </h2>
               <p className="text-slate-600 text-base">
-                当前阶段：<span className="font-semibold text-blue-700">{stateMeta.label}</span> - {stateMeta.desc}
+                当前阶段：<span className="font-semibold text-slate-900">{stateMeta.label}</span> - {stateMeta.desc}
               </p>
             </div>
 
             {/* 简易进度指示条 */}
-            <div className="w-full max-w-md h-1.5 bg-slate-100 rounded-full overflow-hidden">
+            <div className="w-full max-w-md h-1.5 bg-sky-100 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-blue-600 rounded-full animate-pulse" 
+                className="h-full bg-gradient-to-r from-sky-400 to-blue-600 rounded-full" 
                 style={{ width: '60%' }} // 这里暂时写死，后续可以根据 state 计算进度
               />
             </div>
@@ -101,16 +101,13 @@ export default function CurrentLearningCard() {
           {/* 右侧行动按钮 */}
           <button
             onClick={handleContinue}
-            className="group relative inline-flex items-center gap-3 px-8 py-4 bg-blue-600 text-white rounded-xl font-semibold shadow-lg shadow-blue-200 hover:bg-blue-700 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300 whitespace-nowrap"
+            className="group relative inline-flex items-center gap-3 px-7 py-3.5 bg-gradient-to-r from-sky-500 to-blue-600 text-white rounded-xl font-semibold shadow-md hover:from-sky-500 hover:to-blue-700 transition-colors duration-200 whitespace-nowrap"
           >
             <PlayCircle className="w-5 h-5 fill-current" />
             <span>继续学习</span>
             <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
           </button>
         </div>
-        
-        {/* 底部装饰条 */}
-        <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 opacity-20" />
       </div>
     </div>
   )

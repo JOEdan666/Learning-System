@@ -669,11 +669,11 @@ function LearningInterfaceContent() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-100 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-32 w-32 border-b-4 border-blue-500"></div>
-          <p className="mt-6 text-blue-800 text-xl font-medium">正在精心准备系统学习课程……</p>
-          <p className="mt-2 text-blue-600">请稍候，我们正在为您准备最佳的学习体验</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-sky-200 border-t-sky-500"></div>
+          <p className="mt-5 text-slate-800 text-lg font-medium">正在准备学习内容</p>
+          <p className="mt-1.5 text-slate-500 text-sm">请稍候，系统正在初始化会话</p>
         </div>
       </div>
     );
@@ -681,35 +681,37 @@ function LearningInterfaceContent() {
 
   if (!subject || !topic) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex items-center justify-center">
-        <div className="bg-white border border-slate-200 rounded-2xl shadow p-6 max-w-md text-center">
+      <div className="min-h-screen bg-slate-100 text-slate-900 flex items-center justify-center px-4">
+        <div className="zen-panel p-6 max-w-md text-center">
           <h2 className="text-xl font-semibold mb-2">请选择学习内容</h2>
-          <p className="text-sm text-slate-600 mb-4">进入系统化学习前，请先选择学科与主题。</p>
-          <button onClick={() => window.location.href = '/learning-setup'} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold shadow-sm hover:bg-blue-700">去选择内容</button>
+          <p className="text-sm text-slate-600 mb-4">进入系统学习前，请先选择学科与主题。</p>
+          <button onClick={() => window.location.href = '/learning-setup'} className="zen-button px-4 py-2 text-sm">
+            去选择内容
+          </button>
         </div>
       </div>
     )
   }
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+    <div className="min-h-screen bg-slate-100 text-slate-900">
       {/* 顶部导航栏 */}
-      <div className="sticky top-0 z-20 bg-white/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-200 dark:border-slate-800">
+      <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-sky-100">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 flex flex-wrap items-center gap-3 justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/" className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">←</span>
+            <Link href="/" className="text-sky-700 hover:text-sky-800 text-sm flex items-center gap-1">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-sky-100 text-sky-700">←</span>
               返回首页
             </Link>
             <div className="flex flex-col">
               <span className="text-sm font-semibold">{subject || '未选择学科'} · {topic || '未选择主题'}</span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">{selectedRegion} · {grade || '年级未设定'}</span>
+              <span className="text-xs text-slate-500">{selectedRegion} · {grade || '年级未设定'}</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {aiSummary && (
               <button
                 onClick={() => setShowSummaryModal(true)}
-                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                className="px-3 py-2 rounded-lg border border-sky-100 text-sm hover:bg-sky-50"
               >
                 查看总结
               </button>
@@ -725,14 +727,14 @@ function LearningInterfaceContent() {
                   toast.error('重新生成失败，请稍后重试');
                 }
               }}
-              className="px-3 py-2 rounded-lg bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 shadow-sm"
+              className="px-3 py-2 rounded-lg border border-sky-100 bg-white text-sky-700 text-sm font-semibold hover:bg-sky-50 shadow-sm"
             >
               重新生成
             </button>
             <button
               onClick={handleManualSave}
               disabled={isSaving}
-              className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 shadow-sm disabled:opacity-60"
+              className="px-3 py-2 rounded-lg bg-gradient-to-r from-sky-500 to-blue-600 text-white text-sm font-semibold hover:from-sky-500 hover:to-blue-700 shadow-sm disabled:opacity-60"
             >
               {isSaving ? '保存中...' : '保存进度'}
             </button>
@@ -743,22 +745,22 @@ function LearningInterfaceContent() {
       {/* 主要内容区域 */}
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
         {/* 概览卡 */}
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-5 flex flex-wrap gap-4 items-center justify-between">
+        <div className="zen-panel p-5 flex flex-wrap gap-4 items-center justify-between">
           <div className="space-y-1">
-            <p className="text-xs text-blue-600 font-semibold uppercase tracking-wide">系统化学习</p>
+            <p className="text-xs text-sky-700 font-semibold uppercase tracking-wide">系统化学习</p>
             <h1 className="text-2xl font-bold">专注当前主题 · 提升效率</h1>
-            <p className="text-sm text-slate-600 dark:text-slate-300">AI 讲解 → 理解确认 → 测验 → 结果 → 复盘，全程自动记录。</p>
+            <p className="text-sm text-slate-600">AI 讲解 → 理解确认 → 测验 → 结果 → 复盘，全程自动记录。</p>
           </div>
           <div className="flex items-center gap-4 text-sm">
-            <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800">
+            <div className="px-3 py-2 rounded-xl bg-slate-100">
               <div className="text-xs text-slate-500">当前阶段</div>
               <div className="font-semibold">{STEP_FLOW.find(s => s.key === currentStep)?.label || '讲解'}</div>
             </div>
-            <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800">
+            <div className="px-3 py-2 rounded-xl bg-slate-100">
               <div className="text-xs text-slate-500">进度保存</div>
               <div className="font-semibold">{hasManualSave ? '已手动保存' : '自动保存中'}</div>
             </div>
-            <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800">
+            <div className="px-3 py-2 rounded-xl bg-slate-100">
               <div className="text-xs text-slate-500">会话状态</div>
               <div className="font-semibold">{isRestoredSession ? '已恢复' : '新会话'}</div>
             </div>
@@ -766,14 +768,20 @@ function LearningInterfaceContent() {
         </div>
 
         {/* 流程步骤指示 */}
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-4 flex flex-wrap gap-3">
+        <div className="zen-panel p-4 flex flex-wrap gap-3">
           {STEP_FLOW.map((step, idx) => {
             const active = currentStepIndex === idx;
             const done = currentStepIndex > idx;
             return (
               <div
                 key={step.key}
-                className={`flex-1 min-w-[140px] px-3 py-2 rounded-xl border text-sm ${active ? 'border-blue-500 bg-blue-50 text-blue-700' : done ? 'border-green-200 bg-green-50 text-green-700' : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}
+                className={`flex-1 min-w-[140px] px-3 py-2 rounded-xl border text-sm ${
+                  active
+                    ? 'border-sky-500 bg-gradient-to-r from-sky-500 to-blue-600 text-white'
+                    : done
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-slate-200 bg-slate-50 text-slate-600'
+                }`}
               >
                 <div className="font-semibold flex items-center gap-2">
                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold border border-current">
@@ -788,7 +796,7 @@ function LearningInterfaceContent() {
         </div>
 
         {/* 考纲选择器 */}
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-4">
+        <div className="zen-panel p-4">
           <RegionalCurriculumSelector
             selectedRegion={selectedRegion}
             selectedCurriculum={selectedCurriculum}
@@ -812,7 +820,7 @@ function LearningInterfaceContent() {
         </div>
 
         {/* 学习流程内容 */}
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-lg overflow-hidden">
+      <div className="zen-panel shadow-lg overflow-hidden">
         <div className="p-6 md:p-8">
           {currentStep === 'REMEDY' && (
               <ExplainStep 
@@ -901,9 +909,9 @@ function LearningInterfaceContent() {
       {/* 学习总结弹窗 */}
       {showSummaryModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[80vh] overflow-hidden">
             {/* 弹窗头部 */}
-            <div className="bg-gradient-to-r from-purple-500 to-indigo-500 text-white p-6 flex justify-between items-center">
+            <div className="border-b border-sky-100 bg-gradient-to-r from-sky-500 to-blue-600 text-white p-6 flex justify-between items-center">
               <div className="flex items-center space-x-3">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -924,7 +932,7 @@ function LearningInterfaceContent() {
             <div className="p-6 overflow-y-auto max-h-[60vh]">
               {aiSummary ? (
                 <div className="prose prose-lg max-w-none">
-                  <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl p-6 border border-purple-200">
+                  <div className="bg-slate-50 rounded-xl p-6 border border-slate-200">
                     <div className="whitespace-pre-wrap text-gray-800 leading-relaxed">
                       {aiSummary}
                     </div>
@@ -945,7 +953,7 @@ function LearningInterfaceContent() {
             <div className="bg-gray-50 px-6 py-4 flex justify-end">
               <button
                 onClick={() => setShowSummaryModal(false)}
-                className="px-6 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all duration-200 shadow-md"
+                className="px-6 py-2 bg-gradient-to-r from-sky-500 to-blue-600 text-white rounded-lg hover:from-sky-500 hover:to-blue-700 transition-colors duration-200 shadow-md"
               >
                 关闭
               </button>
@@ -953,9 +961,6 @@ function LearningInterfaceContent() {
           </div>
         </div>
       )}
-
-      {/* 底部装饰线 */}
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-400 to-transparent"></div>
     </div>
   );
 }
@@ -963,10 +968,10 @@ function LearningInterfaceContent() {
 export default function LearningInterfacePage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">正在加载学习界面...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-sky-200 border-t-sky-500 mx-auto mb-4"></div>
+          <p className="text-slate-600">正在加载学习界面...</p>
         </div>
       </div>
     }>

@@ -68,9 +68,9 @@ export default function SessionArchivePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-slate-100">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-4 border-sky-300 border-t-sky-500 rounded-full animate-spin"></div>
           <p className="text-gray-500">正在加载学习档案...</p>
         </div>
       </div>
@@ -79,14 +79,14 @@ export default function SessionArchivePage() {
 
   if (error || !session) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center p-8 bg-white rounded-lg shadow-lg">
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-4">
+        <div className="text-center p-8 zen-panel w-full max-w-md">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-gray-800 mb-2">加载失败</h2>
           <p className="text-gray-600 mb-6">{error || '无法找到该记录'}</p>
           <button
             onClick={() => router.back()}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="zen-button px-6 py-2"
           >
             返回列表
           </button>
@@ -121,17 +121,17 @@ Explanation: ${q.explanation}
 `
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
+    <div className="min-h-screen bg-slate-100 pb-20">
       {/* Header */}
-      <div className="sticky top-0 bg-white border-b border-gray-200 z-10 shadow-sm">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+      <div className="sticky top-0 bg-white/88 backdrop-blur-xl border-b border-sky-100 z-10">
+        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => router.back()}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              className="p-2 hover:bg-sky-50 rounded-full transition-colors"
               title="返回"
             >
-              <ArrowLeft className="w-5 h-5 text-gray-600" />
+              <ArrowLeft className="w-5 h-5 text-sky-700" />
             </button>
             <div>
               <h1 className="text-lg font-bold text-gray-900">{session.topic}</h1>
@@ -152,11 +152,11 @@ Explanation: ${q.explanation}
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-8 max-w-4xl space-y-8">
+      <div className="max-w-4xl mx-auto px-4 py-8 space-y-8">
         
         {/* Module 1: Knowledge Explanation */}
         {session.aiExplanation && (
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <section className="zen-panel overflow-hidden">
             <div className="bg-blue-50 px-6 py-4 border-b border-blue-100 flex items-center gap-2">
               <BookOpen className="w-5 h-5 text-blue-600" />
               <h2 className="font-semibold text-blue-900">知识点讲解</h2>
@@ -169,10 +169,10 @@ Explanation: ${q.explanation}
 
         {/* Module 2: Quiz Review */}
         {session.quizQuestions && session.quizQuestions.length > 0 && (
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-            <div className="bg-purple-50 px-6 py-4 border-b border-purple-100 flex items-center gap-2">
-              <HelpCircle className="w-5 h-5 text-purple-600" />
-              <h2 className="font-semibold text-purple-900">测验回顾</h2>
+          <section className="zen-panel overflow-hidden">
+            <div className="bg-sky-50 px-6 py-4 border-b border-sky-100 flex items-center gap-2">
+              <HelpCircle className="w-5 h-5 text-sky-600" />
+              <h2 className="font-semibold text-sky-900">测验回顾</h2>
             </div>
             <div className="divide-y divide-gray-100">
               {session.quizQuestions.map((q, idx) => {

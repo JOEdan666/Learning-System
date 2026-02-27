@@ -3,7 +3,6 @@ import { ClerkProvider } from '@clerk/nextjs'
 import './globals.css'
 import { Toaster } from 'react-hot-toast'
 import 'katex/dist/katex.min.css'
-import AntdRegistry from './lib/AntdRegistry'
 import MainLayout from './components/MainLayout'
 import ThemeProvider from './providers/ThemeProvider'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -32,22 +31,20 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="zh-CN">
         {/* 使用系统字体，避免构建时联网下载 Google Fonts 导致 ECONNRESET */}
-        <body className="min-h-screen bg-slate-50 font-sans">
+        <body className="min-h-screen antialiased">
           <script type="application/ld+json" dangerouslySetInnerHTML={{__html: JSON.stringify({
             '@context':'https://schema.org', '@type':'WebSite', name:'智学引擎',
           })}} />
           
           <ErrorBoundary>
-            <AntdRegistry>
-              <ThemeProvider>
-                {/* 使用 suppressHydrationWarning 消除某些插件或扩展导致的不匹配警告 */}
-                <div suppressHydrationWarning>
-                  <MainLayout>
-                    {children}
-                  </MainLayout>
-                </div>
-              </ThemeProvider>
-            </AntdRegistry>
+            <ThemeProvider>
+              {/* 使用 suppressHydrationWarning 消除某些插件或扩展导致的不匹配警告 */}
+              <div suppressHydrationWarning>
+                <MainLayout>
+                  {children}
+                </MainLayout>
+              </div>
+            </ThemeProvider>
           </ErrorBoundary>
 
           <Toaster
@@ -59,29 +56,30 @@ export default function RootLayout({
               duration: 3000,
               style: {
                 background: '#fff',
-                color: '#1f2937',
-                boxShadow: '0 10px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)',
-                borderRadius: '12px',
-                padding: '14px 18px',
+                color: '#0f172a',
+                boxShadow: '0 18px 42px -30px rgba(15, 23, 42, 0.55)',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0',
+                padding: '12px 16px',
                 fontSize: '14px',
                 fontWeight: 500,
                 maxWidth: '400px',
               },
               success: {
                 style: {
-                  borderLeft: '4px solid #10B981',
+                  borderLeft: '3px solid #0ea5e9',
                 },
-                iconTheme: { primary: '#10B981', secondary: '#fff' }
+                iconTheme: { primary: '#0ea5e9', secondary: '#fff' }
               },
               error: {
                 style: {
-                  borderLeft: '4px solid #EF4444',
+                  borderLeft: '3px solid #ef4444',
                 },
                 iconTheme: { primary: '#EF4444', secondary: '#fff' }
               },
               loading: {
                 style: {
-                  borderLeft: '4px solid #6366F1',
+                  borderLeft: '3px solid #2563eb',
                 },
               },
             }}

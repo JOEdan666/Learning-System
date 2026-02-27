@@ -1,148 +1,108 @@
-'use client';
+'use client'
 
-import React from 'react';
-import { Layout, Menu, theme, ConfigProvider } from 'antd';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import dynamic from 'next/dynamic';
-import { Brain } from 'lucide-react';
+import React from 'react'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { Brain } from 'lucide-react'
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/nextjs'
 
-const { Header, Content, Footer } = Layout;
+const NAV_ITEMS = [
+  { key: '/', label: '主页' },
+  { key: '/learning-setup', label: '开始学习' },
+  { key: '/unified-chat', label: 'AI 对话' },
+  { key: '/learning-history', label: '学习档案' },
+  { key: '/notes', label: '学习笔记' },
+]
 
-// 动态导入避免SSR水合不匹配
-const ReviewNavBadge = dynamic(() => import('./ReviewNavBadge'), { ssr: false });
-const WrongQuestionNavBadge = dynamic(() => import('./WrongQuestionNavBadge'), { ssr: false });
+function isActive(pathname: string, key: string) {
+  if (key === '/') return pathname === '/'
+  return pathname === key || pathname.startsWith(`${key}/`)
+}
 
-import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/nextjs';
-
-const MainLayout = ({ children }: { children: React.ReactNode }) => {
-  const pathname = usePathname();
-  const {
-    token: { colorBgContainer },
-  } = theme.useToken();
-
-  const menuItems = [
-    { key: '/', label: '主页' },
-    { key: '/learning-setup', label: '系统学习' },
-    { key: '/knowledge-map', label: '知识图谱' },
-    { key: '/notes', label: '记录所思' },
-    { key: '/unified-chat', label: 'AI对话' },
-    { key: '/learning-history', label: '自学历史' },
-    { key: '/knowledge-base', label: '知识库' },
-    { key: '/wrong-book', label: '错题库' },
-  ];
-
-  // 简单的路由匹配逻辑，高亮当前菜单
-  const selectedKey = menuItems.find(item => pathname === item.key || (item.key !== '/' && pathname.startsWith(item.key)))?.key || '/';
+export default function MainLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
 
   return (
-    <ConfigProvider
-      theme={{
-        token: {
-          colorPrimary: '#667eea', // 智学引擎主题紫蓝色
-          borderRadius: 8,
-        },
-      }}
-    >
-      <Layout style={{ minHeight: '100vh' }}>
-        <Header style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          background: '#fff', 
-          padding: '0 24px', 
-          position: 'sticky', 
-          top: 0, 
-          zIndex: 1000, 
-          boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02)' 
-        }}>
-          <div className="demo-logo" style={{ marginRight: '48px', display: 'flex', alignItems: 'center' }}>
-            <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none' }}>
-              <div style={{
-                background: 'linear-gradient(135deg, #38bdf8 0%, #2563eb 100%)',
-                color: '#fff',
-                width: '36px',
-                height: '36px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '10px',
-                boxShadow: '0 4px 10px rgba(56, 189, 248, 0.3)'
-              }}>
-                <Brain size={22} strokeWidth={2.5} />
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-40 border-b border-sky-100/80 bg-white/86 backdrop-blur-xl">
+        <div className="mx-auto max-w-6xl px-4 md:px-6">
+          <div className="flex h-16 items-center justify-between gap-3">
+            <Link href="/" className="flex items-center gap-2.5 shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-blue-600 text-white shadow-sm">
+                <Brain className="h-5 w-5" />
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.1' }}>
-                <span style={{
-                  background: 'linear-gradient(90deg, #0f172a 0%, #334155 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  fontSize: '18px',
-                  fontWeight: 800,
-                  letterSpacing: '-0.5px'
-                }}>智学引擎</span>
-                <span style={{
-                  color: '#94a3b8',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  letterSpacing: '0.5px'
-                }}>SMART LEARNING</span>
+              <div className="leading-tight">
+                <div className="text-sm font-semibold text-slate-900 tracking-tight">智学引擎</div>
+                <div className="text-[11px] text-slate-500">Self-Learning OS</div>
               </div>
             </Link>
-          </div>
-          <Menu
-            mode="horizontal"
-            selectedKeys={[selectedKey]}
-            items={menuItems.map(item => ({
-              key: item.key,
-              label: <Link href={item.key} style={{ textDecoration: 'none' }}>{item.label}</Link>,
-            }))}
-            style={{ flex: 1, minWidth: 0, borderBottom: 'none', fontSize: '15px' }}
-          />
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-             <ReviewNavBadge />
-             <WrongQuestionNavBadge />
-             
-             {/* 登录/用户状态按钮 */}
-             <div className="flex items-center ml-2">
-               <SignedOut>
-                 <SignInButton mode="modal">
-                   <button className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-full transition-colors shadow-sm">
-                     登录 / 注册
-                   </button>
-                 </SignInButton>
-               </SignedOut>
-               <SignedIn>
-                 <UserButton 
-                   afterSignOutUrl="/"
-                   appearance={{
-                     elements: {
-                       avatarBox: "w-9 h-9 border border-blue-100"
-                     }
-                   }}
-                 />
-               </SignedIn>
-             </div>
-          </div>
-        </Header>
-        <Content style={{ background: '#f8fafc' }}>
-          <div
-            key={pathname}
-            style={{
-              minHeight: '100%',
-              animation: 'fadeIn 0.2s ease-in-out',
-            }}
-          >
-            {children}
-          </div>
-          <style jsx global>{`
-            @keyframes fadeIn {
-              from { opacity: 0; transform: translateY(8px); }
-              to { opacity: 1; transform: translateY(0); }
-            }
-          `}</style>
-        </Content>
-      </Layout>
-    </ConfigProvider>
-  );
-};
 
-export default MainLayout;
+            <nav className="hidden flex-1 items-center justify-center gap-1 md:flex">
+              {NAV_ITEMS.map((item) => {
+                const active = isActive(pathname, item.key)
+                return (
+                  <Link
+                    key={item.key}
+                    href={item.key}
+                    className={`rounded-full px-4 py-2 text-sm transition-colors ${
+                      active
+                        ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:bg-sky-50 hover:text-slate-900'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </nav>
+
+            <div className="flex items-center justify-end shrink-0">
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="rounded-full bg-gradient-to-r from-sky-500 to-blue-600 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90">
+                    登录 / 注册
+                  </button>
+                </SignInButton>
+              </SignedOut>
+              <SignedIn>
+                <UserButton
+                  afterSignOutUrl="/"
+                  appearance={{
+                    elements: {
+                      avatarBox: 'w-9 h-9 border border-sky-100',
+                    },
+                  }}
+                />
+              </SignedIn>
+            </div>
+          </div>
+
+          <div className="pb-3 md:hidden">
+            <div className="flex gap-2 overflow-x-auto">
+              {NAV_ITEMS.map((item) => {
+                const active = isActive(pathname, item.key)
+                return (
+                  <Link
+                    key={item.key}
+                    href={item.key}
+                    className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs transition-colors ${
+                      active
+                        ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white'
+                        : 'bg-white text-slate-600 border border-sky-100 hover:text-slate-900'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main key={pathname} className="fade-rise">
+        {children}
+      </main>
+    </div>
+  )
+}

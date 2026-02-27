@@ -1,8 +1,8 @@
 'use client'
-import { useState, useMemo, useEffect } from 'react'
+
+import { type ElementType, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { LazyMotion, domAnimation, m } from 'framer-motion'
-import { Zap, ChevronDown, BookOpen, GraduationCap, Calendar, Target, Sparkles } from 'lucide-react'
+import { BookOpen, Calendar, GraduationCap, Target, Zap } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 import type { CurriculumStandard } from '../types/curriculum'
@@ -19,25 +19,26 @@ export default function QuickStart() {
   const semesters = ['上册', '下册']
   const subjects = ['语文', '数学', '物理', '英语', '历史', '化学', '政治', '生物', '地理']
 
-  // 动态加载课程数据库：仅在用户选择年级+学科后才加载
   useEffect(() => {
-    if (grade && subject) {
-      import('../data/curriculumDatabase').then(mod => {
-        setCurriculumDB(mod.CURRICULUM_DATABASE)
-      })
+    if (!grade || !subject) {
+      setCurriculumDB([])
+      return
     }
+    import('../data/curriculumDatabase').then((mod) => {
+      setCurriculumDB(mod.CURRICULUM_DATABASE)
+    })
   }, [grade, subject])
 
   const availableTopics = useMemo(() => {
     if (!grade || !subject || curriculumDB.length === 0) return []
-    const standards = curriculumDB.filter(c =>
-      c.grade.includes(grade) &&
-      c.subject.includes(subject) &&
-      (!semester || !c.semester || c.semester === semester)
+    const standards = curriculumDB.filter(
+      (item) =>
+        item.grade.includes(grade) &&
+        item.subject.includes(subject) &&
+        (!semester || !item.semester || item.semester === semester)
     )
-    const allTopics = standards.flatMap(s => s.topics)
-    const uniqueTopics = Array.from(new Map(allTopics.map(item => [item.name, item])).values())
-    return uniqueTopics
+    const allTopics = standards.flatMap((item) => item.topics)
+    return Array.from(new Map(allTopics.map((item) => [item.name, item])).values())
   }, [grade, subject, semester, curriculumDB])
 
   const handleStart = () => {
@@ -52,7 +53,7 @@ export default function QuickStart() {
     if (semester) params.set('semester', semester)
 
     if (topicId) {
-      const topic = availableTopics.find(t => t.id === topicId)
+      const topic = availableTopics.find((item) => item.id === topicId)
       if (topic) {
         params.set('topic', topic.name)
         params.set('topicId', topic.id)
@@ -64,161 +65,123 @@ export default function QuickStart() {
     router.push(`/learning-interface?${params.toString()}`)
   }
 
-  const SelectField = ({
-    icon: Icon,
-    label,
-    value,
-    options,
-    onChange,
-    placeholder,
-    optional = false,
-    disabled = false
-  }: {
-    icon: React.ElementType
-    label: string
-    value: string
-    options: Array<string | { id: string; name: string }>
-    onChange: (v: string) => void
-    placeholder: string
-    optional?: boolean
-    disabled?: boolean
-  }) => (
-    <div className="space-y-2">
-      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-        <Icon className="w-4 h-4 text-blue-500" />
-        {label}
-        {optional && <span className="text-gray-400 font-normal">(可选)</span>}
-      </label>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-          className="w-full appearance-none px-4 py-3.5 bg-white border-2 border-gray-100 rounded-xl text-gray-800 font-medium focus:border-blue-400 focus:ring-4 focus:ring-blue-100 outline-none transition-all cursor-pointer hover:border-blue-200 disabled:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
-        >
-          <option value="">{placeholder}</option>
-          {options.map(opt => {
-            const val = typeof opt === 'string' ? opt : opt.id
-            const label = typeof opt === 'string' ? opt : opt.name
-            return <option key={val} value={val}>{label}</option>
-          })}
-        </select>
-        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
-      </div>
-    </div>
-  )
+  const canStart = Boolean(grade && subject)
 
   return (
-    <LazyMotion features={domAnimation}>
-    <section id="quick-start" className="py-20 bg-slate-50">
-      <div className="max-w-4xl mx-auto px-6">
-        {/* Section Header */}
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="text-center mb-12"
+    <section id="quick-start" className="zen-panel px-6 py-8 md:px-10 md:py-10">
+      <div className="flex flex-col gap-1 mb-8">
+        <span className="zen-chip w-fit">首页核心入口</span>
+        <h2 className="mt-2 text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">开始一次学习会话</h2>
+        <p className="text-sm md:text-base text-slate-600">
+          只保留必要选择项，完成后立即进入学习流程。
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
+        <SelectField
+          icon={GraduationCap}
+          label="年级"
+          value={grade}
+          options={grades}
+          placeholder="选择你的年级"
+          onChange={(value) => {
+            setGrade(value)
+            setTopicId('')
+          }}
+        />
+
+        <SelectField
+          icon={Calendar}
+          label="学期（可选）"
+          value={semester}
+          options={semesters}
+          placeholder="选择学期"
+          onChange={(value) => {
+            setSemester(value)
+            setTopicId('')
+          }}
+        />
+
+        <SelectField
+          icon={BookOpen}
+          label="学科"
+          value={subject}
+          options={subjects}
+          placeholder="选择学科"
+          onChange={(value) => {
+            setSubject(value)
+            setTopicId('')
+          }}
+        />
+
+        <SelectField
+          icon={Target}
+          label="知识点（可选）"
+          value={topicId}
+          options={availableTopics}
+          placeholder={availableTopics.length > 0 ? '选择具体知识点' : '先选择年级和学科'}
+          onChange={setTopicId}
+          disabled={availableTopics.length === 0}
+        />
+      </div>
+
+      <div className="mt-7 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <p className="text-xs md:text-sm text-slate-500">
+          支持主流教材体系，进入后可继续调整学习路径。
+        </p>
+        <button
+          onClick={handleStart}
+          disabled={!canStart}
+          className="zen-button h-12 px-6 md:px-8 inline-flex items-center justify-center gap-2"
         >
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-100 text-blue-700 text-sm font-medium rounded-full mb-4">
-            <Sparkles className="w-4 h-4" />
-            快速开始
-          </div>
-          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-            3步开启智能学习
-          </h2>
-          <p className="text-gray-500 text-lg max-w-md mx-auto">
-            选择年级和学科，AI将为你定制专属学习方案
-          </p>
-        </m.div>
-
-        {/* Selection Card */}
-        <m.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ delay: 0.1 }}
-          className="bg-white rounded-3xl shadow-xl shadow-blue-500/5 border border-gray-100 overflow-hidden"
-        >
-          {/* Steps indicator */}
-          <div className="bg-gradient-to-r from-blue-500 to-cyan-500 px-8 py-4">
-            <div className="flex items-center justify-center gap-8 text-white">
-              <div className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${grade ? 'bg-white text-blue-600' : 'bg-white/30'}`}>1</div>
-                <span className="text-sm font-medium hidden sm:inline">选择年级</span>
-              </div>
-              <div className="w-8 h-0.5 bg-white/30" />
-              <div className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${subject ? 'bg-white text-blue-600' : 'bg-white/30'}`}>2</div>
-                <span className="text-sm font-medium hidden sm:inline">选择学科</span>
-              </div>
-              <div className="w-8 h-0.5 bg-white/30" />
-              <div className="flex items-center gap-2">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${grade && subject ? 'bg-white text-blue-600' : 'bg-white/30'}`}>3</div>
-                <span className="text-sm font-medium hidden sm:inline">开始学习</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-8 md:p-10">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <SelectField
-                icon={GraduationCap}
-                label="年级"
-                value={grade}
-                options={grades}
-                onChange={(v) => { setGrade(v); setTopicId('') }}
-                placeholder="选择你的年级"
-              />
-
-              <SelectField
-                icon={Calendar}
-                label="学期"
-                value={semester}
-                options={semesters}
-                onChange={(v) => { setSemester(v); setTopicId('') }}
-                placeholder="选择学期"
-                optional
-              />
-
-              <SelectField
-                icon={BookOpen}
-                label="学科"
-                value={subject}
-                options={subjects}
-                onChange={(v) => { setSubject(v); setTopicId('') }}
-                placeholder="选择薄弱学科"
-              />
-
-              <SelectField
-                icon={Target}
-                label="知识点"
-                value={topicId}
-                options={availableTopics}
-                onChange={(v) => setTopicId(v)}
-                placeholder={availableTopics.length > 0 ? '选择具体知识点' : (grade && subject ? '暂无数据' : '先选择年级和学科')}
-                optional
-                disabled={availableTopics.length === 0}
-              />
-            </div>
-
-            {/* CTA Button */}
-            <div className="text-center">
-              <button
-                onClick={handleStart}
-                disabled={!grade || !subject}
-                className="inline-flex items-center gap-3 px-10 py-4 text-lg font-semibold text-white bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-blue-500/25 hover:scale-105 disabled:hover:scale-100"
-              >
-                <Zap className="w-5 h-5" />
-                {topicId ? '针对性突击训练' : '开始AI诊断测验'}
-              </button>
-              <p className="mt-4 text-sm text-gray-400">
-                支持人教版、苏教版、北师大版等主流教材
-              </p>
-            </div>
-          </div>
-        </m.div>
+          <Zap className="h-4 w-4" />
+          开始学习
+        </button>
       </div>
     </section>
-    </LazyMotion>
+  )
+}
+
+function SelectField({
+  icon: Icon,
+  label,
+  value,
+  options,
+  placeholder,
+  onChange,
+  disabled = false,
+}: {
+  icon: ElementType
+  label: string
+  value: string
+  options: Array<string | { id: string; name: string }>
+  placeholder: string
+  onChange: (value: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <label className="block space-y-2">
+      <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+        <Icon className="w-4 h-4 text-slate-500" />
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        className="zen-select disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => {
+          const optionValue = typeof option === 'string' ? option : option.id
+          const optionLabel = typeof option === 'string' ? option : option.name
+          return (
+            <option key={optionValue} value={optionValue}>
+              {optionLabel}
+            </option>
+          )
+        })}
+      </select>
+    </label>
   )
 }
