@@ -33,10 +33,10 @@ export default function Home() {
       <section className="zen-panel px-6 py-10 md:px-10 md:py-12 text-center">
         <span className="zen-chip">专注于学习本身</span>
         <h1 className="mt-5 text-3xl md:text-5xl font-semibold tracking-tight text-slate-900">
-          一个更克制的自学系统
+          Incredible OS
         </h1>
         <p className="mt-4 text-slate-600 max-w-2xl mx-auto leading-relaxed">
-          把核心流程放回首页，减少干扰和切换成本。选定目标后，直接开始学习。
+          把诊断、学习、复盘集中在一个入口，减少切换与干扰，让每次学习都直达结果。
         </p>
       </section>
 
